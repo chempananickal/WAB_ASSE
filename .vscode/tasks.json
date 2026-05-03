@@ -1,0 +1,38 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Typst: watch main.pdf",
+      "type": "shell",
+      "command": "typst",
+      "args": [
+        "watch",
+        "main.typ",
+        "main.pdf"
+      ],
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Typst: watch exposee.pdf",
+      "type": "shell",
+      "command": "typst",
+      "args": [
+        "watch",
+        "exposee.typ",
+        "exposee.pdf"
+      ],
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Typst: watch all PDFs",
+      "dependsOn": [
+        "Typst: watch main.pdf",
+        "Typst: watch exposee.pdf"
+      ],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    }
+  ]
+}

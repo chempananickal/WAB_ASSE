@@ -1,0 +1,12 @@
+{
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "[typst]": {
+    "editor.formatOnSave": true
+  },
+  "tinymist.exportPdf": "onType",
+  "tinymist.projectResolution": "lockDatabase",
+  "tinymist.typstExtraArgs": [
+    "--save-lock"
+  ],
+}
