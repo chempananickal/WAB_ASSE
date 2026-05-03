@@ -17,6 +17,11 @@
     description: "A JIT compilation strategy where optimized versions of certain functions are written in a lower-level language and then dynamically patched into the interpreter at runtime.",
     group: glossary_group,
   ),
+  szz: (
+    short: "SZZ",
+    description: "The Sliwezki-Zeller-Zimmermann algorithm, a technique for identifying bug-introducing commits by tracing back from bug-fixing commits through version control history.",
+    group: glossary_group,
+  ),
   jit: (
     short: "JIT",
     long: "Just-in-Time",

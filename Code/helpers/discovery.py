@@ -172,7 +172,27 @@ def discover_top_packages(
     cache_dir: Path,
     progress_bar: tqdm | None = None,
 ) -> list[PackageRecord]:
-    """Discover the most depended-upon packages in a practical PyPI candidate pool."""
+    """Discover the most depended-upon packages in a practical PyPI pool.
+
+    Parameters
+    ----------
+    session : requests.Session
+        HTTP session used for PyPI and deps.dev requests.
+    top_n : int
+        Number of packages to keep after reranking by direct dependents.
+    candidate_pool : int
+        Number of candidate packages to inspect from the public Top PyPI list.
+    cache_dir : Path
+        Cache root for HTTP responses.
+    progress_bar : tqdm | None, optional
+        Progress bar updated as candidate packages are processed.
+
+    Returns
+    -------
+    list[PackageRecord]
+        Selected packages sorted by direct dependent count and assigned final
+        ranks.
+    """
 
     ranking_payload = fetch_json(session, TOP_PYPI_PACKAGES_URL, cache_dir / "http")
     rows = ranking_payload.get("rows", [])[:candidate_pool]

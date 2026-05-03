@@ -1,4 +1,3 @@
-pydriller
 pandas
 matplotlib
 seaborn

@@ -63,4 +63,54 @@
     prompt: [Use all languages recognized by lizard instead of restricting the non-Python analysis to C-family files.],
     usage: [Expanded lizard language coverage.],
   ),
+  (
+    system: [GitHub Copilot 13],
+    prompt: [Add a CLI option to restrict the analysis to Python files only while keeping mixed-language analysis as the default.],
+    usage: [Added Python-only analysis mode.],
+  ),
+  (
+    system: [GitHub Copilot 14],
+    prompt: [Refactor the analysis script into helper modules and keep the main script as the orchestration entrypoint.],
+    usage: [Reorganized the analysis code into helper modules.],
+  ),
+  (
+    system: [GitHub Copilot 15],
+    prompt: [Replace the PyDriller repository mining implementation with direct Git CLI queries and keep the SZZ analysis working on top of that path.],
+    usage: [Replaced PyDriller-based mining with Git CLI mining and SZZ integration.],
+  ),
+  (
+    system: [GitHub Copilot 16],
+    prompt: [Improve the SZZ output by separating unresolved cases and adding rename-aware matching for moved files and renamed functions.],
+    usage: [Added SZZ attribution categories and rename-aware matching.],
+  ),
+  (
+    system: [GitHub Copilot 17],
+    prompt: [Rename the stale non-Python parser helper so it reflects the current lizard-based multi-language behavior.],
+    usage: [Renamed the non-Python parser helper for clarity.],
+  ),
+  (
+    system: [GitHub Copilot 18],
+    prompt: [Add NumPy-style docstrings to the important analysis, mining, and reporting functions.],
+    usage: [Added NumPy-style docstrings to key functions.],
+  ),
+  (
+    system: [GitHub Copilot 19],
+    prompt: [Rewrite the repository README so it reads like a cohesive project README rather than patchwork.],
+    usage: [Reworked the README structure and usage documentation.],
+  ),
+  (
+    system: [GitHub Copilot 20],
+    prompt: [Make plotting reusable from precomputed results, add richer reporting outputs, and export grouped raw JSON.],
+    usage: [Added plot-only rendering, extra summaries and plots, and raw JSON output.],
+  ),
+  (
+    system: [GitHub Copilot 21],
+    prompt: [Persist commit dates for bug-fixing and bug-introducing commits and add a time-series plot for bug-fix commits.],
+    usage: [Added commit-date export and bug-fix timeline reporting.],
+  ),
+  (
+    system: [GitHub Copilot 22],
+    prompt: [Replace the many CLI flags with a TOML config file, keep only --cfg in the CLI, and make rename-matching thresholds configurable.],
+    usage: [Introduced TOML-based configuration and configurable rename matching.],
+  ),
 )

@@ -67,8 +67,6 @@ def consume_progress_events(progress_queue: Any, repo_bars: Mapping[str, tqdm]) 
         try:
             event = progress_queue.get(timeout=1.0)
         except queue.Empty:
-            for bar in repo_bars.values():
-                bar.refresh()
             continue
         kind = event.get("kind")
         if kind == "stop":

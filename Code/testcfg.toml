@@ -1,0 +1,50 @@
+# Reverse-dependency discovery settings.
+[discovery]
+top_n = 10
+candidate_pool = 250
+discovery_only = false
+
+# Output, cache, and repository paths. Relative paths resolve from this file.
+[paths]
+output_dir = "output/latest"
+cache_dir = "cache"
+repos_dir = "repos"
+
+# Mining and SZZ settings.
+[mining]
+years = 2.0
+
+# Set this to 0 to disable SZZ entirely. Omit the key to leave it uncapped.
+# max_szz_commits_per_repo = 50
+
+# Omit this key to mine every eligible commit inside the time window.
+# max_commits_per_repo = 250
+
+include_tests = false
+python_only = false
+
+# Execution and rendering settings.
+[execution]
+
+# Omit this key to let the pipeline choose a worker count automatically.
+workers = 4
+
+mode = "both"
+log_level = "INFO"
+refresh_mining_cache = false
+
+# Rename-matching thresholds shared by bug-fix before/after analysis and SZZ.
+[matching.rename]
+
+# Accept a structural rename immediately when at least this fraction of the
+# function span still overlaps after the change.
+min_overlap_ratio = 0.6
+
+# Accept a match when there is some overlap and the start/end boundaries moved
+# by at most this many total lines.
+max_boundary_distance_with_overlap = 6
+
+# Otherwise accept only when the combined overlap/name score is at least this
+# high and the total boundary shift stays within the tighter limit below.
+min_score = 0.99
+max_boundary_distance_for_score = 3

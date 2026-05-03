@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import ast
+from difflib import SequenceMatcher
 import hashlib
 import json
 import math
 import re
 import subprocess
-import warnings
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 import lizard
 import pandas as pd
-from pydriller import Repository
 from scipy.stats import pearsonr, spearmanr
 
 from .common import (
+    BUGFIX_EVENT_COLUMNS,
     EXCLUDED_PATH_PARTS,
     FUNCTION_METRIC_COLUMNS,
     LIZARD_SOURCE_EXTENSIONS,
@@ -25,6 +25,7 @@ from .common import (
     PYTHON_SOURCE_EXTENSIONS,
     SUBPROCESS_TEXT_KWARGS,
     SZZ_COLUMNS,
+    empty_bugfix_event_frame,
     empty_function_metrics_frame,
     empty_package_summary_frame,
     empty_szz_frame,
@@ -32,6 +33,7 @@ from .common import (
     selected_source_extensions,
     selected_source_globs,
 )
+from .config import DEFAULT_RENAME_MATCH_CONFIG, RenameMatchConfig
 from .discovery import normalize_pypi_name
 from .models import BugfixDeletionRecord, PackageRecord, ParsedFunction
 from .progress import emit_log, emit_progress
@@ -43,56 +45,6 @@ BUGFIX_PATTERN = re.compile(
 PROGRESS_UPDATE_BATCH_SIZE = 1
 
 
-class ComplexityCounter(ast.NodeVisitor):
-    """Count cyclomatic complexity using a small AST-based heuristic."""
-
-    def __init__(self) -> None:
-        self.score = 1
-
-    def visit_If(self, node: ast.If) -> None:
-        self.score += 1
-        self.generic_visit(node)
-
-    def visit_For(self, node: ast.For) -> None:
-        self.score += 1
-        self.generic_visit(node)
-
-    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
-        self.score += 1
-        self.generic_visit(node)
-
-    def visit_While(self, node: ast.While) -> None:
-        self.score += 1
-        self.generic_visit(node)
-
-    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
-        self.score += 1
-        self.generic_visit(node)
-
-    def visit_Assert(self, node: ast.Assert) -> None:
-        self.score += 1
-        self.generic_visit(node)
-
-    def visit_IfExp(self, node: ast.IfExp) -> None:
-        self.score += 1
-        self.generic_visit(node)
-
-    def visit_BoolOp(self, node: ast.BoolOp) -> None:
-        self.score += max(0, len(node.values) - 1)
-        self.generic_visit(node)
-
-    def visit_comprehension(self, node: ast.comprehension) -> None:
-        self.score += 1 + len(node.ifs)
-        self.generic_visit(node)
-
-    def visit_Match(self, node: ast.Match) -> None:
-        for case in node.cases:
-            pattern = case.pattern
-            if not isinstance(pattern, ast.MatchAs) or pattern.pattern is not None:
-                self.score += 1
-        self.generic_visit(node)
-
-
 class FunctionCollector(ast.NodeVisitor):
     """Collect functions and methods from a Python AST."""
 
@@ -100,7 +52,7 @@ class FunctionCollector(ast.NodeVisitor):
         self.file_path = file_path
         self.scope: list[str] = []
         self.class_stack = 0
-        self.functions: list[ParsedFunction] = []
+        self.functions: list[tuple[str, int, int, str]] = []
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.scope.append(node.name)
@@ -117,41 +69,79 @@ class FunctionCollector(ast.NodeVisitor):
 
     def _handle_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         qualname = ".".join([*self.scope, node.name]) if self.scope else node.name
-        counter = ComplexityCounter()
-        counter.visit(node)
         kind = "method" if self.class_stack else "function"
-        self.functions.append(
-            ParsedFunction(
-                file_path=self.file_path,
-                qualname=qualname,
-                start_line=node.lineno,
-                end_line=getattr(node, "end_lineno", node.lineno),
-                complexity=counter.score,
-                kind=kind,
-            )
-        )
+        self.functions.append((qualname, node.lineno, getattr(node, "end_lineno", node.lineno), kind))
         self.scope.append(node.name)
         self.generic_visit(node)
         self.scope.pop()
 
 
 def parse_python_functions(source: str, file_path: str) -> list[ParsedFunction]:
-    """Parse Python functions and methods from source text."""
+    """Parse Python functions while sourcing complexity from lizard.
+
+    Parameters
+    ----------
+    source : str
+        Full Python source text for the file.
+    file_path : str
+        Repository-relative file path used for parser metadata.
+
+    Returns
+    -------
+    list[ParsedFunction]
+        Python function descriptors with AST-derived qualified names and line
+        spans, paired with lizard-derived cyclomatic complexity values.
+    """
 
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", SyntaxWarning)
-            tree = ast.parse(source, filename=file_path)
+        tree = ast.parse(source, filename=file_path)
     except SyntaxError:
         return []
 
     collector = FunctionCollector(file_path=file_path)
     collector.visit(tree)
-    return collector.functions
+    lizard_functions = parse_lizard_functions(source, file_path)
+    by_span = {
+        (function.start_line, function.end_line): function.complexity
+        for function in lizard_functions
+    }
+    by_start = {
+        function.start_line: function.complexity
+        for function in lizard_functions
+    }
+
+    functions: list[ParsedFunction] = []
+    for qualname, start_line, end_line, kind in collector.functions:
+        complexity = by_span.get((start_line, end_line), by_start.get(start_line, 1))
+        functions.append(
+            ParsedFunction(
+                file_path=file_path,
+                qualname=qualname,
+                start_line=start_line,
+                end_line=end_line,
+                complexity=complexity,
+                kind=kind,
+            )
+        )
+    return functions
 
 
-def parse_c_family_functions(source: str, file_path: str) -> list[ParsedFunction]:
-    """Parse non-Python functions using lizard."""
+def parse_lizard_functions(source: str, file_path: str) -> list[ParsedFunction]:
+    """Parse functions and methods with lizard.
+
+    Parameters
+    ----------
+    source : str
+        Source text to analyze.
+    file_path : str
+        Repository-relative file path used for parser selection and metadata.
+
+    Returns
+    -------
+    list[ParsedFunction]
+        Parsed function descriptors recovered from the source text. Returns an
+        empty list when lizard cannot analyze the file.
+    """
 
     try:
         analysis = lizard.analyze_file.analyze_source_code(file_path, source)
@@ -175,13 +165,27 @@ def parse_c_family_functions(source: str, file_path: str) -> list[ParsedFunction
 
 
 def parse_source_functions(source: str, file_path: str) -> list[ParsedFunction]:
-    """Parse supported source files into function descriptors."""
+    """Parse a supported source file into function descriptors.
+
+    Parameters
+    ----------
+    source : str
+        Full source text for the file.
+    file_path : str
+        Repository-relative file path used to select the parser.
+
+    Returns
+    -------
+    list[ParsedFunction]
+        Parsed function descriptors for the file. Unsupported files return an
+        empty list.
+    """
 
     extension = Path(file_path).suffix.lower()
     if extension in PYTHON_SOURCE_EXTENSIONS:
         return parse_python_functions(source, file_path)
     if extension in LIZARD_SOURCE_EXTENSIONS:
-        return parse_c_family_functions(source, file_path)
+        return parse_lizard_functions(source, file_path)
     return []
 
 
@@ -196,6 +200,136 @@ def function_by_qualname(
 
     leaf = qualname.split(".")[-1]
     return next((item for item in functions if item.qualname.split(".")[-1] == leaf), None)
+
+
+def resolve_commit_file_paths(
+    repo_path: Path,
+    parent_hash: str,
+    commit_hash: str,
+    file_path: str,
+    rename_cache: dict[tuple[str, str], dict[str, tuple[str, str]]],
+) -> tuple[str, str]:
+    """Resolve file paths across a commit, accounting for renames.
+
+    Parameters
+    ----------
+    repo_path : Path
+        Local repository root.
+    parent_hash : str
+        First parent revision of ``commit_hash``.
+    commit_hash : str
+        Revision whose file path should be resolved.
+    file_path : str
+        Repository-relative path referenced by the SZZ attribution.
+    rename_cache : dict[tuple[str, str], dict[str, tuple[str, str]]]
+        Cache of commit-level old and new path mappings.
+
+    Returns
+    -------
+    tuple[str, str]
+        Pair of ``(before_path, after_path)`` for the requested file. When no
+        rename information is present, both elements are ``file_path``.
+    """
+
+    cache_key = (parent_hash, commit_hash)
+    path_map = rename_cache.get(cache_key)
+    if path_map is None:
+        path_map = {}
+        output = run_git(
+            repo_path,
+            "diff",
+            "--find-renames",
+            "--name-status",
+            parent_hash,
+            commit_hash,
+        )
+        for line in output.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            status = parts[0]
+            if status.startswith("R") and len(parts) >= 3:
+                old_path = parts[1].replace("\\", "/")
+                new_path = parts[2].replace("\\", "/")
+                path_map[old_path] = (old_path, new_path)
+                path_map[new_path] = (old_path, new_path)
+                continue
+            path = parts[1].replace("\\", "/")
+            path_map[path] = (path, path)
+        rename_cache[cache_key] = path_map
+
+    return path_map.get(file_path, (file_path, file_path))
+
+
+def function_span(function: ParsedFunction) -> int:
+    """Return the inclusive line span for a function."""
+
+    return max(function.end_line - function.start_line + 1, 1)
+
+
+def overlapping_line_count(left: ParsedFunction, right: ParsedFunction) -> int:
+    """Return the inclusive overlap in line numbers between two functions."""
+
+    return max(0, min(left.end_line, right.end_line) - max(left.start_line, right.start_line) + 1)
+
+
+def match_corresponding_function(
+    reference: ParsedFunction,
+    candidates: Sequence[ParsedFunction],
+    rename_match: RenameMatchConfig = DEFAULT_RENAME_MATCH_CONFIG,
+) -> ParsedFunction | None:
+    """Match a likely renamed function using structural similarity.
+
+    Parameters
+    ----------
+    reference : ParsedFunction
+        Function descriptor from the known side of the commit comparison.
+    candidates : Sequence[ParsedFunction]
+        Candidate functions parsed from the opposite side of the commit.
+
+    Returns
+    -------
+    ParsedFunction | None
+        Best structural match when line-span overlap and name similarity are
+        strong enough to be trustworthy, otherwise ``None``.
+    """
+
+    filtered_candidates = [item for item in candidates if item.kind == reference.kind] or list(candidates)
+    if not filtered_candidates:
+        return None
+
+    ranked_candidates: list[tuple[float, ParsedFunction]] = []
+    reference_leaf = reference.qualname.split(".")[-1]
+    for candidate in filtered_candidates:
+        overlap = overlapping_line_count(reference, candidate)
+        overlap_ratio = overlap / max(function_span(reference), function_span(candidate))
+        name_similarity = SequenceMatcher(
+            None,
+            reference_leaf,
+            candidate.qualname.split(".")[-1],
+        ).ratio()
+        boundary_distance = abs(reference.start_line - candidate.start_line) + abs(
+            reference.end_line - candidate.end_line
+        )
+        score = (overlap_ratio * 10.0) + name_similarity - (boundary_distance / 1000.0)
+        ranked_candidates.append((score, candidate))
+
+    ranked_candidates.sort(key=lambda item: item[0], reverse=True)
+    best_score, best_candidate = ranked_candidates[0]
+    best_overlap_ratio = overlapping_line_count(reference, best_candidate) / max(
+        function_span(reference),
+        function_span(best_candidate),
+    )
+    boundary_distance = abs(reference.start_line - best_candidate.start_line) + abs(
+        reference.end_line - best_candidate.end_line
+    )
+    if best_overlap_ratio >= rename_match.min_overlap_ratio:
+        return best_candidate
+    if best_overlap_ratio > 0 and boundary_distance <= rename_match.max_boundary_distance_with_overlap:
+        return best_candidate
+    if best_score >= rename_match.min_score and boundary_distance <= rename_match.max_boundary_distance_for_score:
+        return best_candidate
+    return None
 
 
 def functions_for_lines(
@@ -243,6 +377,71 @@ def run_git(repo_path: Path, *args: str) -> str:
     return result.stdout
 
 
+def git_config_value(repo_path: Path, key: str) -> str:
+    """Read a local Git config value, returning an empty string when unset."""
+
+    result = subprocess.run(
+        ["git", "config", "--local", "--get", key],
+        cwd=repo_path,
+        capture_output=True,
+        check=False,
+        **SUBPROCESS_TEXT_KWARGS,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def run_git_best_effort(repo_path: Path, *args: str) -> None:
+    """Run a Git command and ignore failures when cleaning local repo state."""
+
+    subprocess.run(
+        ["git", *args],
+        cwd=repo_path,
+        capture_output=True,
+        check=False,
+        **SUBPROCESS_TEXT_KWARGS,
+    )
+
+
+def fetch_repository_updates(repo_path: Path, refetch: bool = False) -> None:
+    """Refresh origin branches and tags, tolerating upstream tag moves."""
+
+    branch_args = ["fetch", "origin", "--prune"]
+    tag_args = ["fetch", "origin", "--tags", "--force", "--prune", "--prune-tags"]
+    if refetch:
+        branch_args.append("--refetch")
+        tag_args.append("--refetch")
+
+    run_git(repo_path, *branch_args)
+    run_git(repo_path, *tag_args)
+
+
+def repository_uses_partial_clone(repo_path: Path) -> bool:
+    """Report whether a local repository is configured as a partial clone."""
+
+    promisor = git_config_value(repo_path, "remote.origin.promisor").lower()
+    partial_filter = git_config_value(repo_path, "remote.origin.partialclonefilter")
+    return promisor == "true" or bool(partial_filter)
+
+
+def upgrade_partial_clone(repo_path: Path) -> None:
+    """Convert a partial clone into a full clone before expensive mining operations."""
+
+    if not repository_uses_partial_clone(repo_path):
+        return
+
+    run_git_best_effort(repo_path, "config", "--local", "--unset-all", "remote.origin.promisor")
+    run_git_best_effort(
+        repo_path,
+        "config",
+        "--local",
+        "--unset-all",
+        "remote.origin.partialclonefilter",
+    )
+    fetch_repository_updates(repo_path, refetch=True)
+
+
 def git_show_file(repo_path: Path, revision: str, file_path: str) -> str | None:
     """Read a file from a Git revision."""
 
@@ -258,8 +457,46 @@ def git_show_file(repo_path: Path, revision: str, file_path: str) -> str | None:
     return result.stdout
 
 
+def resolve_default_branch(repo_path: Path) -> str:
+    """Resolve the remote default branch for an existing clone.
+
+    Prefer the local `origin/HEAD` symbolic ref after fetch, and fall back to a
+    direct remote HEAD query when the symbolic ref is unavailable.
+    """
+
+    try:
+        branch_ref = run_git(repo_path, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
+    except RuntimeError:
+        branch_ref = ""
+    if branch_ref.startswith("origin/"):
+        return branch_ref.removeprefix("origin/")
+
+    ls_remote_output = run_git(repo_path, "ls-remote", "--symref", "origin", "HEAD")
+    for line in ls_remote_output.splitlines():
+        if not line.startswith("ref: ") or not line.endswith("\tHEAD"):
+            continue
+        head_ref = line.removeprefix("ref: ").split("\t", maxsplit=1)[0]
+        if head_ref.startswith("refs/heads/"):
+            return head_ref.removeprefix("refs/heads/")
+
+    raise RuntimeError("Could not resolve the default branch for remote 'origin'.")
+
+
 def ensure_repository(repo_url: str, repos_dir: Path) -> Path:
-    """Clone or update a Git repository."""
+    """Clone or update a repository used in the analysis.
+
+    Parameters
+    ----------
+    repo_url : str
+        Clone URL for the upstream source repository.
+    repos_dir : Path
+        Directory where analysis repositories are stored locally.
+
+    Returns
+    -------
+    Path
+        Local repository path ready for mining.
+    """
 
     ensure_directory(repos_dir)
     repo_name = repo_url.rstrip("/").split("/")[-1]
@@ -268,17 +505,17 @@ def ensure_repository(repo_url: str, repos_dir: Path) -> Path:
     target = repos_dir / repo_name
 
     if target.exists():
-        run_git(target, "fetch", "--all", "--tags", "--prune")
-        default_branch = (
-            run_git(target, "remote", "show", "origin").split("HEAD branch: ")[-1].splitlines()[0]
-        )
+        upgrade_partial_clone(target)
+        fetch_repository_updates(target)
+        default_branch = resolve_default_branch(target)
         run_git(target, "checkout", default_branch)
         run_git(target, "pull", "--ff-only", "origin", default_branch)
         return target
 
     subprocess.run(
-        ["git", "clone", "--filter=blob:none", repo_url, str(target)],
+        ["git", "clone", repo_url, str(target)],
         check=True,
+        **SUBPROCESS_TEXT_KWARGS,
     )
     return target
 
@@ -310,6 +547,7 @@ def build_mining_cache_key(
     skip_szz: bool,
     max_szz_commits_per_repo: int | None,
     max_commits_per_repo: int | None,
+    rename_match: RenameMatchConfig,
     commit_hashes: Sequence[str],
 ) -> tuple[str, dict[str, Any]]:
     """Build a stable cache key for one package mining configuration."""
@@ -325,6 +563,7 @@ def build_mining_cache_key(
         "skip_szz": skip_szz,
         "max_szz_commits_per_repo": max_szz_commits_per_repo,
         "max_commits_per_repo": max_commits_per_repo,
+        "rename_match": rename_match.as_dict(),
         "commit_count": len(commit_hashes),
         "commit_digest": commit_digest,
     }
@@ -342,49 +581,65 @@ def retag_cached_result(
     package: PackageRecord,
     function_df: pd.DataFrame,
     package_summary: pd.DataFrame,
+    bugfix_event_df: pd.DataFrame,
     szz_df: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Rewrite cached outputs with the current package label and rank."""
 
     function_df = function_df.copy()
     package_summary = package_summary.copy()
+    bugfix_event_df = bugfix_event_df.copy()
     szz_df = szz_df.copy()
     if not function_df.empty:
         function_df["package"] = package.name
         function_df["package_rank"] = package.rank
     if not package_summary.empty:
+        if "unique_bug_introducing_commits" not in package_summary.columns:
+            package_summary["unique_bug_introducing_commits"] = int(
+                szz_df["bug_introducing_commit"].dropna().nunique()
+            )
         package_summary["package"] = package.name
         package_summary["package_rank"] = package.rank
+        package_summary = package_summary.reindex(columns=PACKAGE_SUMMARY_COLUMNS)
+    if not bugfix_event_df.empty:
+        bugfix_event_df["package"] = package.name
+        bugfix_event_df["package_rank"] = package.rank
+        bugfix_event_df = bugfix_event_df.reindex(columns=BUGFIX_EVENT_COLUMNS)
     if not szz_df.empty:
         szz_df["package"] = package.name
-    return function_df, package_summary, szz_df
+        szz_df = szz_df.reindex(columns=SZZ_COLUMNS)
+    return function_df, package_summary, bugfix_event_df, szz_df
 
 
 def load_mining_cache(
     package: PackageRecord,
     cache_dir: Path,
     cache_key: str,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame] | None:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame] | None:
     """Load cached mining outputs for a package when all files are present."""
 
     cache_root = mining_cache_directory(cache_dir, package, cache_key)
     metadata_path = cache_root / "metadata.json"
     function_path = cache_root / "function_metrics.csv"
     package_path = cache_root / "package_summary.csv"
+    bugfix_event_path = cache_root / "bugfix_event_metrics.csv"
     szz_path = cache_root / "szz_function_attributions.csv"
-    if not all(path.exists() for path in [metadata_path, function_path, package_path, szz_path]):
+    if not all(path.exists() for path in [metadata_path, function_path, package_path, bugfix_event_path, szz_path]):
         return None
 
     function_df = pd.read_csv(function_path)
     package_summary = pd.read_csv(package_path)
+    bugfix_event_df = pd.read_csv(bugfix_event_path)
     szz_df = pd.read_csv(szz_path)
     if function_df.empty:
         function_df = empty_function_metrics_frame()
     if package_summary.empty:
         package_summary = empty_package_summary_frame(package)
+    if bugfix_event_df.empty:
+        bugfix_event_df = empty_bugfix_event_frame()
     if szz_df.empty:
         szz_df = empty_szz_frame()
-    return retag_cached_result(package, function_df, package_summary, szz_df)
+    return retag_cached_result(package, function_df, package_summary, bugfix_event_df, szz_df)
 
 
 def write_mining_cache(
@@ -394,6 +649,7 @@ def write_mining_cache(
     metadata: Mapping[str, Any],
     function_df: pd.DataFrame,
     package_summary: pd.DataFrame,
+    bugfix_event_df: pd.DataFrame,
     szz_df: pd.DataFrame,
 ) -> None:
     """Persist mining outputs for reuse on later runs."""
@@ -406,7 +662,67 @@ def write_mining_cache(
     )
     function_df.to_csv(cache_root / "function_metrics.csv", index=False)
     package_summary.to_csv(cache_root / "package_summary.csv", index=False)
+    bugfix_event_df.to_csv(cache_root / "bugfix_event_metrics.csv", index=False)
     szz_df.to_csv(cache_root / "szz_function_attributions.csv", index=False)
+
+
+def resolve_function_pair(
+    before_functions: Sequence[ParsedFunction],
+    after_functions: Sequence[ParsedFunction],
+    qualname: str,
+    rename_match: RenameMatchConfig = DEFAULT_RENAME_MATCH_CONFIG,
+) -> tuple[ParsedFunction | None, ParsedFunction | None]:
+    """Resolve the before/after function pair across one change."""
+
+    before_function = function_by_qualname(before_functions, qualname)
+    after_function = function_by_qualname(after_functions, qualname)
+    if before_function is not None and after_function is None:
+        after_function = match_corresponding_function(before_function, after_functions, rename_match)
+    elif after_function is not None and before_function is None:
+        before_function = match_corresponding_function(after_function, before_functions, rename_match)
+    return before_function, after_function
+
+
+def categorize_complexity_delta(complexity_delta: int) -> str:
+    """Map a measured complexity delta to a reporting category."""
+
+    if complexity_delta > 0:
+        return "Increase"
+    if complexity_delta < 0:
+        return "Decrease"
+    return "No change"
+
+
+def describe_function_complexity_change(
+    before_functions: Sequence[ParsedFunction],
+    after_functions: Sequence[ParsedFunction],
+    qualname: str,
+    rename_match: RenameMatchConfig = DEFAULT_RENAME_MATCH_CONFIG,
+) -> tuple[int | None, str, int | None, int | None, str | None]:
+    """Describe a function's complexity change across two parsed snapshots."""
+
+    before_function, after_function = resolve_function_pair(
+        before_functions,
+        after_functions,
+        qualname,
+        rename_match,
+    )
+
+    if before_function is None and after_function is not None:
+        return None, "New function", None, after_function.complexity, after_function.kind
+    if before_function is not None and after_function is None:
+        return None, "Deleted or renamed", before_function.complexity, None, before_function.kind
+    if before_function is None and after_function is None:
+        return None, "Match unavailable", None, None, None
+
+    complexity_delta = after_function.complexity - before_function.complexity
+    return (
+        complexity_delta,
+        categorize_complexity_delta(complexity_delta),
+        before_function.complexity,
+        after_function.complexity,
+        after_function.kind,
+    )
 
 
 def collect_head_functions(
@@ -511,33 +827,185 @@ def compute_complexity_delta(
     file_path: str,
     qualname: str,
     snapshot_cache: dict[tuple[str, str], list[ParsedFunction]],
-) -> int | None:
-    """Compute complexity delta for a function across a commit."""
+    rename_cache: dict[tuple[str, str], dict[str, tuple[str, str]]],
+    rename_match: RenameMatchConfig = DEFAULT_RENAME_MATCH_CONFIG,
+) -> tuple[int | None, str]:
+    """Compute a function-level complexity change across a blamed commit.
+
+    Parameters
+    ----------
+    repo_path : Path
+        Local repository root.
+    commit_hash : str
+        Blamed commit that may have introduced the bug.
+    file_path : str
+        Repository-relative path recorded for the deleted bug-fix lines.
+    qualname : str
+        Qualified function name associated with the deleted lines.
+    snapshot_cache : dict[tuple[str, str], list[ParsedFunction]]
+        Cache of parsed function snapshots keyed by revision and path.
+    rename_cache : dict[tuple[str, str], dict[str, tuple[str, str]]]
+        Cache of commit-level rename mappings.
+
+    Returns
+    -------
+    tuple[int | None, str]
+        Pair of ``(complexity_delta, category)`` where the category explains
+        whether complexity increased, stayed unchanged, decreased, or could not
+        be matched because the function is new, deleted or renamed,
+        unavailable, or has no parent commit.
+    """
 
     try:
         parent_hash = run_git(repo_path, "rev-parse", f"{commit_hash}^").strip()
     except RuntimeError:
-        return None
+        return None, "No parent commit"
 
-    before_key = (parent_hash, file_path)
-    after_key = (commit_hash, file_path)
+    before_path, after_path = resolve_commit_file_paths(
+        repo_path,
+        parent_hash,
+        commit_hash,
+        file_path,
+        rename_cache,
+    )
+
+    before_key = (parent_hash, before_path)
+    after_key = (commit_hash, after_path)
 
     if before_key not in snapshot_cache:
-        source_before = git_show_file(repo_path, parent_hash, file_path)
+        source_before = git_show_file(repo_path, parent_hash, before_path)
         snapshot_cache[before_key] = (
-            parse_source_functions(source_before, file_path) if source_before else []
+            parse_source_functions(source_before, before_path) if source_before else []
         )
     if after_key not in snapshot_cache:
-        source_after = git_show_file(repo_path, commit_hash, file_path)
+        source_after = git_show_file(repo_path, commit_hash, after_path)
         snapshot_cache[after_key] = (
-            parse_source_functions(source_after, file_path) if source_after else []
+            parse_source_functions(source_after, after_path) if source_after else []
         )
 
-    before_function = function_by_qualname(snapshot_cache[before_key], qualname)
-    after_function = function_by_qualname(snapshot_cache[after_key], qualname)
-    if before_function is None or after_function is None:
+    complexity_delta, category, _, _, _ = describe_function_complexity_change(
+        snapshot_cache[before_key],
+        snapshot_cache[after_key],
+        qualname,
+        rename_match,
+    )
+    return complexity_delta, category
+
+
+def parse_commit_parent(repo_path: Path, commit_hash: str) -> str | None:
+    """Return the first parent hash for a commit, if one exists."""
+
+    output = run_git(repo_path, "rev-list", "--parents", "-n", "1", commit_hash).strip()
+    parts = output.split()
+    if len(parts) < 2:
         return None
-    return after_function.complexity - before_function.complexity
+    return parts[1]
+
+
+def commit_metadata(repo_path: Path, commit_hash: str) -> tuple[str, str]:
+    """Return the full commit message and ISO-8601 commit date for a revision."""
+
+    output = run_git(repo_path, "log", "-n", "1", "--format=%cI%x00%B", commit_hash)
+    commit_date, _, message = output.partition("\x00")
+    return message.strip(), commit_date.strip()
+
+
+def commit_message(repo_path: Path, commit_hash: str) -> str:
+    """Return the full commit message for a revision."""
+
+    message, _ = commit_metadata(repo_path, commit_hash)
+    return message
+
+
+def parse_unified_zero_ranges(start: int, length: int) -> list[int]:
+    """Expand a unified-diff range into explicit line numbers."""
+
+    if length <= 0:
+        return []
+    return list(range(start, start + length))
+
+
+def parse_unified_zero_diff(
+    patch_text: str,
+) -> list[tuple[str | None, str | None, list[int], list[int]]]:
+    """Parse a zero-context Git patch into per-file line additions and deletions."""
+
+    file_diffs: list[tuple[str | None, str | None, list[int], list[int]]] = []
+    current_old_path: str | None = None
+    current_new_path: str | None = None
+    added_lines: list[int] = []
+    deleted_lines: list[int] = []
+
+    def flush_current() -> None:
+        nonlocal current_old_path, current_new_path, added_lines, deleted_lines
+        if current_old_path is None and current_new_path is None:
+            return
+        file_diffs.append((current_old_path, current_new_path, added_lines, deleted_lines))
+        current_old_path = None
+        current_new_path = None
+        added_lines = []
+        deleted_lines = []
+
+    for raw_line in patch_text.splitlines():
+        line = raw_line.rstrip("\n")
+        if line.startswith("diff --git "):
+            flush_current()
+            continue
+        if line.startswith("--- "):
+            path = line[4:].strip()
+            current_old_path = None if path == "/dev/null" else path.removeprefix("a/")
+            continue
+        if line.startswith("+++ "):
+            path = line[4:].strip()
+            current_new_path = None if path == "/dev/null" else path.removeprefix("b/")
+            continue
+        if line.startswith("@@ "):
+            match = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
+            if match is None:
+                continue
+            old_start = int(match.group(1))
+            old_len = int(match.group(2) or "1")
+            new_start = int(match.group(3))
+            new_len = int(match.group(4) or "1")
+            deleted_lines.extend(parse_unified_zero_ranges(old_start, old_len))
+            added_lines.extend(parse_unified_zero_ranges(new_start, new_len))
+    flush_current()
+    return file_diffs
+
+
+def git_commit_file_diffs(
+    repo_path: Path,
+    parent_commit: str | None,
+    commit_hash: str,
+    python_only: bool,
+) -> list[tuple[str | None, str | None, list[int], list[int]]]:
+    """Return per-file changed line numbers for a commit using Git CLI."""
+
+    pathspec_args = ["--", *selected_source_globs(python_only)]
+
+    if parent_commit is None:
+        patch_text = run_git(
+            repo_path,
+            "show",
+            "--format=",
+            "--no-ext-diff",
+            "--unified=0",
+            "--no-renames",
+            commit_hash,
+            *pathspec_args,
+        )
+    else:
+        patch_text = run_git(
+            repo_path,
+            "diff",
+            "--no-ext-diff",
+            "--unified=0",
+            "--no-renames",
+            parent_commit,
+            commit_hash,
+            *pathspec_args,
+        )
+    return parse_unified_zero_diff(patch_text)
 
 
 def mine_repository_metrics(
@@ -549,16 +1017,51 @@ def mine_repository_metrics(
     skip_szz: bool,
     max_szz_commits_per_repo: int | None,
     max_commits_per_repo: int | None,
+    rename_match: RenameMatchConfig = DEFAULT_RENAME_MATCH_CONFIG,
     progress_queue: Any | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Mine function-level metrics, correlations, and SZZ data for one repository."""
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Mine function metrics and SZZ attributions for one repository.
+
+    Parameters
+    ----------
+    package : PackageRecord
+        Package metadata for the repository being mined.
+    repo_path : Path
+        Local repository root.
+    commit_hashes : Sequence[str]
+        Recent source commits selected for analysis.
+    include_tests : bool
+        Whether test and example files should be included.
+    python_only : bool
+        Whether non-Python files should be excluded from mining and complexity
+        analysis.
+    skip_szz : bool
+        Whether to skip the SZZ attribution phase.
+    max_szz_commits_per_repo : int | None
+        Optional cap on bug-fix commits entering SZZ for the repository.
+    max_commits_per_repo : int | None
+        Optional cap on mined commits for the repository.
+    progress_queue : Any | None, optional
+        Cross-process queue used to emit progress events.
+
+    Returns
+    -------
+    tuple[pandas.DataFrame, pandas.DataFrame, pandas.DataFrame, pandas.DataFrame]
+        Function-level metrics, package summary metrics, bug-fix event rows,
+        and SZZ attribution rows for the repository.
+    """
 
     commit_total = len(commit_hashes)
     if not commit_hashes:
         emit_progress(progress_queue, "repo_start", package.name, total=1, phase="no commits")
         emit_log(progress_queue, f"{package.name}: no supported source commits found in the requested window.")
         emit_progress(progress_queue, "repo_done", package.name)
-        return empty_function_metrics_frame(), empty_package_summary_frame(package), empty_szz_frame()
+        return (
+            empty_function_metrics_frame(),
+            empty_package_summary_frame(package),
+            empty_bugfix_event_frame(),
+            empty_szz_frame(),
+        )
 
     emit_progress(
         progress_queue,
@@ -589,13 +1092,12 @@ def mine_repository_metrics(
     bugfix_touches: Counter[tuple[str, str]] = Counter()
     all_touches: Counter[tuple[str, str]] = Counter()
     bugfix_deletions: list[BugfixDeletionRecord] = []
+    bugfix_event_rows: list[dict[str, Any]] = []
     bugfix_commit_count = 0
+    commit_message_cache: dict[str, str] = {}
+    commit_date_cache: dict[str, str] = {}
+    rename_cache: dict[tuple[str, str], dict[str, tuple[str, str]]] = {}
 
-    repository_kwargs: dict[str, Any] = {
-        "path_to_repo": str(repo_path),
-        "only_no_merge": True,
-        "only_modifications_with_file_types": list(selected_source_extensions(python_only)),
-    }
     emit_log(
         progress_queue,
         (
@@ -617,37 +1119,35 @@ def mine_repository_metrics(
         )
         emit_progress(progress_queue, "repo_advance", package.name, amount=1)
 
-        repository = Repository(**{**repository_kwargs, "only_commits": [commit_hash]})
-        commit = next(repository.traverse_commits(), None)
-        if commit is None:
-            continue
-
-        message = commit.msg or ""
+        message, commit_date_value = commit_metadata(repo_path, commit_hash)
+        commit_message_cache[commit_hash] = message
+        commit_date_cache[commit_hash] = commit_date_value
         is_bugfix = bool(BUGFIX_PATTERN.search(message))
-        parent_commit = commit.parents[0] if commit.parents else None
+        parent_commit = parse_commit_parent(repo_path, commit_hash)
         if is_bugfix:
             bugfix_commit_count += 1
 
-        analyzed_files = [
-            modified_file
-            for modified_file in commit.modified_files
-            if should_analyze_path(
-                modified_file.new_path or modified_file.old_path,
+        file_diffs = git_commit_file_diffs(
+            repo_path,
+            parent_commit,
+            commit_hash,
+            python_only=python_only,
+        )
+        for before_path, current_path, added_lines, deleted_lines in file_diffs:
+            current_path = (current_path or before_path or "").replace("\\", "/")
+            before_path = (before_path or current_path or "").replace("\\", "/")
+            analysis_path = current_path or before_path
+            if not should_analyze_path(
+                analysis_path,
                 include_tests=include_tests,
                 python_only=python_only,
-            )
-        ]
-        for modified_file in analyzed_files:
-            diff_parsed = modified_file.diff_parsed or {"added": [], "deleted": []}
-            added_lines = [line_number for line_number, _ in diff_parsed.get("added", [])]
-            deleted_lines = [line_number for line_number, _ in diff_parsed.get("deleted", [])]
-            current_path = (modified_file.new_path or modified_file.old_path or "").replace("\\", "/")
-            before_path = (modified_file.old_path or current_path or "").replace("\\", "/")
+            ):
+                continue
 
-            before_source = modified_file.source_code_before or ""
-            after_source = modified_file.source_code or ""
-            before_functions = parse_source_functions(before_source, before_path)
-            after_functions = parse_source_functions(after_source, current_path)
+            before_source = git_show_file(repo_path, parent_commit, before_path) if parent_commit else None
+            after_source = git_show_file(repo_path, commit_hash, current_path)
+            before_functions = parse_source_functions(before_source or "", before_path)
+            after_functions = parse_source_functions(after_source or "", current_path)
 
             touched_functions: dict[tuple[str, str], ParsedFunction] = {}
             for qualname, function in functions_for_lines(after_functions, added_lines).items():
@@ -659,6 +1159,38 @@ def mine_repository_metrics(
                 all_touches[key] += 1
                 if is_bugfix:
                     bugfix_touches[key] += 1
+
+            if is_bugfix:
+                for _, touched_function in touched_functions.items():
+                    (
+                        bugfix_complexity_delta,
+                        bugfix_complexity_category,
+                        bugfix_before_complexity,
+                        bugfix_after_complexity,
+                        resolved_kind,
+                    ) = describe_function_complexity_change(
+                        before_functions,
+                        after_functions,
+                        touched_function.qualname,
+                        rename_match,
+                    )
+                    bugfix_event_rows.append(
+                        {
+                            "package": package.name,
+                            "package_rank": package.rank,
+                            "before_file_path": before_path,
+                            "after_file_path": current_path,
+                            "function": touched_function.qualname,
+                            "kind": resolved_kind or touched_function.kind,
+                            "bugfix_commit": commit_hash,
+                            "bugfix_message": message,
+                            "bugfix_commit_date": commit_date_value,
+                            "bugfix_before_complexity": bugfix_before_complexity,
+                            "bugfix_after_complexity": bugfix_after_complexity,
+                            "bugfix_complexity_delta": bugfix_complexity_delta,
+                            "bugfix_complexity_category": bugfix_complexity_category,
+                        }
+                    )
 
             if skip_szz or not is_bugfix or not parent_commit:
                 continue
@@ -676,7 +1208,7 @@ def mine_repository_metrics(
                 bugfix_deletions.append(
                     BugfixDeletionRecord(
                         package_name=package.name,
-                        bugfix_commit=commit.hash,
+                        bugfix_commit=commit_hash,
                         parent_commit=parent_commit,
                         file_path=before_path,
                         function_qualname=qualname,
@@ -730,6 +1262,7 @@ def mine_repository_metrics(
                 "median_complexity": float(function_df["complexity"].median()) if not function_df.empty else math.nan,
                 "functions_bugfixed": int(function_df["was_bugfixed"].sum()) if not function_df.empty else 0,
                 "bugfix_commits": int(bugfix_commit_count),
+                "unique_bug_introducing_commits": 0,
                 "spearman_r": spearman_value,
                 "spearman_p": spearman_pvalue,
                 "pearson_r": pearson_value,
@@ -767,21 +1300,34 @@ def mine_repository_metrics(
             for blamed_hash in blamed_hashes:
                 if blamed_hash in {deletion.bugfix_commit, "0" * 40}:
                     continue
-                complexity_delta = compute_complexity_delta(
+                complexity_delta, complexity_category = compute_complexity_delta(
                     repo_path,
                     blamed_hash,
                     deletion.file_path,
                     deletion.function_qualname,
                     snapshot_cache,
+                    rename_cache,
+                    rename_match,
                 )
+                blamed_message = commit_message_cache.get(blamed_hash)
+                blamed_date = commit_date_cache.get(blamed_hash)
+                if blamed_message is None or blamed_date is None:
+                    blamed_message, blamed_date = commit_metadata(repo_path, blamed_hash)
+                    commit_message_cache[blamed_hash] = blamed_message
+                    commit_date_cache[blamed_hash] = blamed_date
                 szz_rows.append(
                     {
                         "package": package.name,
                         "bugfix_commit": deletion.bugfix_commit,
+                        "bugfix_message": commit_message_cache.get(deletion.bugfix_commit, ""),
+                        "bugfix_commit_date": commit_date_cache.get(deletion.bugfix_commit, ""),
                         "bug_introducing_commit": blamed_hash,
+                        "bug_introducing_message": blamed_message,
+                        "bug_introducing_commit_date": blamed_date,
                         "file_path": deletion.file_path,
                         "function": deletion.function_qualname,
                         "complexity_delta": complexity_delta,
+                        "complexity_category": complexity_category,
                         "complexity_increased": (
                             int(complexity_delta > 0) if complexity_delta is not None else math.nan
                         ),
@@ -794,17 +1340,29 @@ def mine_repository_metrics(
                 package.name,
                 amount=pending_szz_updates,
             )
+
+    unique_bug_introducing_commits = int(
+        len({row["bug_introducing_commit"] for row in szz_rows if row["bug_introducing_commit"]})
+    )
+    package_summary["unique_bug_introducing_commits"] = unique_bug_introducing_commits
+
     emit_progress(progress_queue, "repo_phase", package.name, phase="done")
     emit_progress(progress_queue, "repo_done", package.name)
     emit_log(
         progress_queue,
         (
             f"{package.name}: {len(function_df):,} functions, {bugfix_commit_count} bug-fix commits"
-            + (f", {len(szz_rows)} SZZ attributions" if not skip_szz else "")
+            + (
+                f", {len(szz_rows)} SZZ attributions, "
+                f"{unique_bug_introducing_commits} unique bug-introducing commits"
+                if not skip_szz
+                else ""
+            )
         ),
     )
+    bugfix_event_df = pd.DataFrame(bugfix_event_rows, columns=BUGFIX_EVENT_COLUMNS)
     szz_df = pd.DataFrame(szz_rows, columns=SZZ_COLUMNS)
-    return function_df, package_summary, szz_df
+    return function_df, package_summary, bugfix_event_df, szz_df
 
 
 def mine_package_task(
@@ -816,14 +1374,50 @@ def mine_package_task(
     skip_szz: bool,
     max_szz_commits_per_repo: int | None,
     max_commits_per_repo: int | None,
+    rename_match: RenameMatchConfig,
     progress_queue: Any | None,
     cache_dir: Path | None,
     cache_key: str | None,
     cache_metadata: Mapping[str, Any] | None,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Run repository mining for one package in a worker process."""
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Run repository mining for one package inside a worker process.
 
-    function_df, package_summary, szz_df = mine_repository_metrics(
+    Parameters
+    ----------
+    package : PackageRecord
+        Package metadata for the repository being mined.
+    repo_path : Path
+        Local repository root.
+    commit_hashes : Sequence[str]
+        Recent source commits selected for analysis.
+    include_tests : bool
+        Whether test and example files should be included.
+    python_only : bool
+        Whether non-Python files should be excluded from mining and complexity
+        analysis.
+    skip_szz : bool
+        Whether to skip the SZZ attribution phase.
+    max_szz_commits_per_repo : int | None
+        Optional cap on bug-fix commits entering SZZ for the repository.
+    max_commits_per_repo : int | None
+        Optional cap on mined commits for the repository.
+    progress_queue : Any | None
+        Cross-process queue used to emit progress events.
+    cache_dir : Path | None
+        Cache root for writing per-package mining results.
+    cache_key : str | None
+        Cache key for the current mining configuration.
+    cache_metadata : Mapping[str, Any] | None
+        Metadata written alongside cached mining outputs.
+
+    Returns
+    -------
+    tuple[pandas.DataFrame, pandas.DataFrame, pandas.DataFrame, pandas.DataFrame]
+        Function-level metrics, package summary metrics, bug-fix event rows,
+        and SZZ attribution rows for the package.
+    """
+
+    function_df, package_summary, bugfix_event_df, szz_df = mine_repository_metrics(
         package=package,
         repo_path=repo_path,
         commit_hashes=commit_hashes,
@@ -832,6 +1426,7 @@ def mine_package_task(
         skip_szz=skip_szz,
         max_szz_commits_per_repo=max_szz_commits_per_repo,
         max_commits_per_repo=max_commits_per_repo,
+        rename_match=rename_match,
         progress_queue=progress_queue,
     )
     if cache_dir is not None and cache_key is not None and cache_metadata is not None:
@@ -842,6 +1437,7 @@ def mine_package_task(
             metadata=cache_metadata,
             function_df=function_df,
             package_summary=package_summary,
+            bugfix_event_df=bugfix_event_df,
             szz_df=szz_df,
         )
-    return function_df, package_summary, szz_df
+    return function_df, package_summary, bugfix_event_df, szz_df

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -39,11 +40,12 @@ LOG_LEVELS = {
     "INFO": logging.INFO,
     "DEBUG": logging.DEBUG,
 }
-MINING_CACHE_VERSION = 2
+MINING_CACHE_VERSION = 8
 SUBPROCESS_TEXT_KWARGS: dict[str, Any] = {
     "text": True,
     "encoding": "utf-8",
     "errors": "replace",
+    "stdin": subprocess.DEVNULL,
 }
 PYTHON_SOURCE_EXTENSIONS = {".py"}
 FUNCTION_METRIC_COLUMNS = [
@@ -65,18 +67,39 @@ PACKAGE_SUMMARY_COLUMNS = [
     "median_complexity",
     "functions_bugfixed",
     "bugfix_commits",
+    "unique_bug_introducing_commits",
     "spearman_r",
     "spearman_p",
     "pearson_r",
     "pearson_p",
 ]
+BUGFIX_EVENT_COLUMNS = [
+    "package",
+    "package_rank",
+    "before_file_path",
+    "after_file_path",
+    "function",
+    "kind",
+    "bugfix_commit",
+    "bugfix_message",
+    "bugfix_commit_date",
+    "bugfix_before_complexity",
+    "bugfix_after_complexity",
+    "bugfix_complexity_delta",
+    "bugfix_complexity_category",
+]
 SZZ_COLUMNS = [
     "package",
     "bugfix_commit",
+    "bugfix_message",
+    "bugfix_commit_date",
     "bug_introducing_commit",
+    "bug_introducing_message",
+    "bug_introducing_commit_date",
     "file_path",
     "function",
     "complexity_delta",
+    "complexity_category",
     "complexity_increased",
 ]
 
@@ -124,6 +147,12 @@ def empty_function_metrics_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=FUNCTION_METRIC_COLUMNS)
 
 
+def empty_bugfix_event_frame() -> pd.DataFrame:
+    """Create an empty bugfix event dataframe with stable columns."""
+
+    return pd.DataFrame(columns=BUGFIX_EVENT_COLUMNS)
+
+
 def empty_package_summary_frame(package: PackageRecord) -> pd.DataFrame:
     """Create an empty package summary row for a package."""
 
@@ -137,6 +166,7 @@ def empty_package_summary_frame(package: PackageRecord) -> pd.DataFrame:
                 "median_complexity": math.nan,
                 "functions_bugfixed": 0,
                 "bugfix_commits": 0,
+                "unique_bug_introducing_commits": 0,
                 "spearman_r": math.nan,
                 "spearman_p": math.nan,
                 "pearson_r": math.nan,

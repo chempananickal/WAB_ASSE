@@ -1,158 +1,221 @@
 # Python Ecosystem Analysis
 
-This directory contains a reproducible analysis pipeline for the term-paper question:
+This directory contains the analysis pipeline used for the paper's empirical study of widely depended-upon Python packages. The pipeline discovers packages from PyPI and deps.dev, mines their source repositories with Git, measures function-level cyclomatic complexity, and relates that complexity to bug-fix activity and simplified SZZ-style attribution.
 
-1. Which Python packages are the most depended upon?
-2. Is higher cyclomatic complexity associated with more bug-fix activity at the function level?
-3. Do bug-introducing commits, as approximated with a simplified SZZ pass, tend to increase complexity?
+The project is built for reproducibility rather than interactivity. It can either compute fresh results, render plots and summaries from preexisting CSV outputs, or do both in one run.
 
-## What the script does
+## Research scope
 
-`analyze_python_ecosystem.py` performs the full workflow:
+The analysis is designed to answer three questions:
 
-1. Downloads a large candidate set of popular PyPI projects.
-2. Resolves each candidate's default release and reverse dependency counts.
-3. Reranks candidates by direct dependent count.
-4. Resolves each selected package's source repository.
-5. Clones or updates the repositories.
-6. Mines the last `N` years of supported source commits with PyDriller.
-7. Measures function-level cyclomatic complexity.
-8. Counts how often bug-fix commits touch each function.
-9. Runs a simplified line-based SZZ attribution pass.
-10. Exports CSV files, plots, and a Markdown summary.
+1. Which Python packages are most central when ranked by reverse dependencies rather than downloads?
+2. Are more complex functions associated with more bug-fix activity?
+3. When simplified SZZ attribution finds likely bug-introducing commits, do those commits tend to increase complexity?
 
-## Code layout
+## What the pipeline does
 
-The entrypoint stays in `analyze_python_ecosystem.py` and now focuses on CLI parsing plus phase orchestration.
+At a high level, `analyze_python_ecosystem.py` performs the following steps:
 
-Most implementation details live under `Code/helpers/`:
+1. Collect a candidate pool of packages.
+2. Rerank that pool by `directDependentCount`.
+3. Resolve each selected package's source repository.
+4. Clone or update the repositories under `Code/repos/`.
+5. Select recent source commits inside the requested time window.
+6. Measure function-level cyclomatic complexity.
+7. Count how often bug-fix commits touch each function.
+8. Run a simplified line-based SZZ pass over bug-fix deletions.
+9. Export CSV tables under `Code/output/latest/` by default.
+10. Render plots and summary artifacts either immediately or later from those saved tables.
 
-- `analysis_core.py`: source parsing, Git access, caching, and repository mining.
-- `common.py`: shared constants, file-scope filters, dataframe schemas, and small filesystem helpers.
-- `discovery.py`: PyPI and deps.dev discovery, HTTP caching, and repository resolution.
-- `models.py`: dataclasses shared across the pipeline.
-- `progress.py`: compact logging and progress-bar event handling.
-- `reporting.py`: CSV export, plots, and summary rendering.
+## Repository layout
 
-## Why this uses more than the PyPI JSON API
+- `analysis.toml`: default commented TOML configuration for discovery, paths, mining, execution, and rename matching.
+- `analyze_python_ecosystem.py`: CLI entrypoint and phase orchestration.
+- `helpers/analysis_core.py`: Git mining, parsing, SZZ attribution, caching, and repository analysis.
+- `helpers/discovery.py`: package discovery, reverse-dependency lookup, and repository resolution.
+- `helpers/reporting.py`: CSV export and plot generation.
+- `helpers/common.py`: shared constants, schemas, filesystem helpers, and source filters.
+- `helpers/models.py`: dataclasses used across the pipeline.
+- `helpers/progress.py`: logging and progress-bar event handling.
+- `requirements.txt`: direct Python dependencies.
+- `cache/`: cached discovery responses and per-package mining results.
+- `repos/`: cloned source repositories.
+- `output/`: generated CSVs and plots.
 
-PyPI exposes first-party project metadata, but it does not expose a public reverse dependency leaderboard. The pipeline therefore combines:
+## Requirements
 
-- PyPI project metadata for package summaries and project URLs.
-- deps.dev package graph endpoints for reverse dependency counts and repository resolution.
+Before running the analysis, make sure the following are available:
 
-That tradeoff is documented explicitly because "most downloaded" and "most depended upon" are different rankings, and only the latter answers the research question.
+- A Python environment with the packages in `Code/requirements.txt`.
+- Git on `PATH`, because repository mining is implemented directly on top of Git CLI commands.
+- Network access for cold runs, since package metadata and reverse-dependency counts are fetched from PyPI and deps.dev.
 
-## Installation
 
-Activate the prepared environment first:
+## Quick start
+
+*First, set up the environment and install dependencies:*
 
 ```bash
-source C:/Users/rubin/miniforge3/Scripts/activate asse
-```
-
-Install the direct Python dependencies listed in `requirements.txt`:
-
-```bash
+python -m venv venv
+source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
 pip install -r Code/requirements.txt
 ```
 
-## Typical usage
+The CLI now has a single runtime option besides help: `-c/--cfg`, which points to a TOML config file. If you do not pass it, the checked-in `Code/analysis.toml` is used.
 
-Run a quick discovery-only pass:
-
-```bash
-python Code/analyze_python_ecosystem.py --top-n 10 --candidate-pool 200 --discovery-only
-```
-
-Run the full two-year analysis:
+Run a discovery-only pass by setting `discovery_only = true` in `Code/analysis.toml`, then running:
 
 ```bash
-python Code/analyze_python_ecosystem.py --top-n 10 --candidate-pool 250 --years 2
+python Code/analyze_python_ecosystem.py
 ```
 
-Run the full analysis but skip the SZZ phase:
+Run the full default analysis with the checked-in config:
 
 ```bash
-python Code/analyze_python_ecosystem.py --top-n 10 --candidate-pool 250 --years 2 --skip-szz
+python Code/analyze_python_ecosystem.py
 ```
 
-Run the same analysis in a Python-only mode when you want to exclude non-Python files for testing:
+Use a different config file when you want a separate run profile:
 
 ```bash
-python Code/analyze_python_ecosystem.py --top-n 10 --candidate-pool 250 --years 2 --python-only
+python Code/analyze_python_ecosystem.py --cfg Code/analysis.toml
 ```
 
-Limit the number of bug-fix commits that enter the SZZ phase when iterating on performance:
+For example, to regenerate plots and summaries from an existing output directory without rerunning mining, set `execution.mode = "plot"` in a config file and run:
 
 ```bash
-python Code/analyze_python_ecosystem.py --top-n 10 --candidate-pool 250 --years 2 --max-szz-commits-per-repo 50
+python Code/analyze_python_ecosystem.py --cfg Code/analysis.toml
 ```
 
-Bound the mining run to the most recent Python commits per repository when you want a faster initial analysis:
+Likewise, faster bounded analysis, Python-only runs, cache refreshes, and SZZ disabling are now configuration edits rather than ad hoc CLI flags. The defaults and commented optional keys in `Code/analysis.toml` are intended to be the primary run documentation.
 
-```bash
-python Code/analyze_python_ecosystem.py --top-n 10 --candidate-pool 250 --years 2 --max-commits-per-repo 250 --max-szz-commits-per-repo 50
+## Configuration reference
+
+The TOML config is grouped by concern:
+
+- `[discovery]`: package selection and whether to stop after discovery.
+- `[paths]`: output, cache, and repository locations.
+- `[mining]`: lookback window, optional commit caps, test inclusion, and Python-only filtering.
+- `[execution]`: worker count, compute versus plot mode, logging, and cache refresh behavior.
+- `[matching.rename]`: thresholds that decide when a function move or rename is still trusted as the same logical function.
+
+Relative paths in `[paths]` resolve from the directory containing the config file.
+
+## CLI reference
+
+The CLI intentionally exposes only two switches:
+
+| Option | Meaning |
+| --- | --- |
+| `-c`, `--cfg` | Path to the TOML configuration file. Defaults to `Code/analysis.toml`. |
+| `-h`, `--help` | Show CLI help. |
+
+Run `python Code/analyze_python_ecosystem.py --help` for the minimal CLI help text.
+
+## Example workflow
+
+Disable SZZ entirely by setting the following in the config:
+
+```toml
+[mining]
+max_szz_commits_per_repo = 0
 ```
 
-Use multiple worker processes to mine packages in parallel:
+Render plots and summaries only:
 
-```bash
-python Code/analyze_python_ecosystem.py --top-n 10 --candidate-pool 250 --years 2 --max-commits-per-repo 250 --max-szz-commits-per-repo 50 --workers 4
+```toml
+[execution]
+mode = "plot"
 ```
 
-Reuse cached per-package mining results on repeated runs with the same effective commit window and analysis parameters:
+Restrict the analysis to Python files only:
 
-```bash
-python Code/analyze_python_ecosystem.py --top-n 10 --candidate-pool 250 --years 2 --max-commits-per-repo 250 --skip-szz --workers 4
+```toml
+[mining]
+python_only = true
 ```
 
-Force a cache refresh when you want to recompute those per-package mining results:
+Refresh cached mining results:
 
-```bash
-python Code/analyze_python_ecosystem.py --top-n 10 --candidate-pool 250 --years 2 --max-commits-per-repo 250 --skip-szz --workers 4 --refresh-mining-cache
+```toml
+[execution]
+refresh_mining_cache = true
 ```
 
-## Important methodological notes
+Use a faster bounded run while iterating:
 
-- Reverse dependency ranking is computed from `directDependentCount` on the default package version.
-- Bug-fix commits are identified with a message heuristic using tokens such as `fix`, `bugfix`, `regression`, and `hotfix`.
-- Cyclomatic complexity is estimated with a mixed parser approach: Python files use the built-in AST and other supported source files use `lizard`.
-- `--python-only` restricts discovery, mining, and complexity analysis to `.py` files while leaving the default mixed-language behavior unchanged.
-- The SZZ phase is intentionally simple and transparent:
-  - it traces deleted lines in bug-fix commits back to blamed commits in the parent revision;
-  - it does not attempt rename-aware or issue-link-aware disambiguation;
-  - it does not rely on a built-in PyDriller SZZ implementation, because PyDriller does not provide one.
+```toml
+[mining]
+max_szz_commits_per_repo = 50
+max_commits_per_repo = 250
+
+[execution]
+workers = 4
+mode = "compute"
+```
 
 ## Outputs
 
-The default output directory is `Code/output/latest/`.
+By default, results are written to `Code/output/latest/`.
 
-Expected artifacts include:
+### CSV files
 
-- `top_packages.csv`
-- `function_metrics.csv`
-- `package_summary.csv`
-- `complexity_bucket_summary.csv`
-- `szz_function_attributions.csv`
-- `szz_summary.csv`
-- `analysis_summary.md`
-- `plots/*.png`
+- `top_packages.csv`: selected packages and discovery metadata.
+- `function_metrics.csv`: function-level complexity and bug-fix touch counts.
+- `package_summary.csv`: per-package aggregates and correlation statistics.
+- `bugfix_event_metrics.csv`: one row per bugfix-touched function with complexity before and after the bug-fix commit.
+- `complexity_bucket_summary.csv`: complexity buckets and bug-fix shares.
+- `bugfix_complexity_change_summary.csv`: summary counts for how bug-fix commits changed function complexity.
+- `szz_function_attributions.csv`: function-level SZZ attribution rows.
+- `szz_summary.csv`: summary counts for the SZZ complexity-change categories.
+- `analysis_summary.md`: Markdown summary of the current result set.
+- `raw_function_histories.json`: grouped raw results keyed by function, including bug-fix events, SZZ attributions, and commit messages.
+
+### Plots
+
+- `plots/top_packages.png`: reverse-dependency ranking of selected packages.
+- `plots/complexity_vs_bugfixes.png`: scatter plot of function complexity versus bug-fix counts.
+- `plots/complexity_bucket_bugfix_share.png`: bug-fix share by complexity bucket.
+- `plots/bugfix_complexity_before_after.png`: complexity before versus after bug-fix commits for touched functions.
+- `plots/bugfix_complexity_changes.png`: categorical view of how bug-fix commits changed function complexity.
+- `plots/package_correlations.png`: package-level correlation view.
+- `plots/szz_complexity_changes.png`: SZZ complexity-change summary, generated only when SZZ attributions exist.
+
+## Methodology notes
+
+### Package ranking
+
+The ranking target is ecosystem centrality, not download popularity. The pipeline therefore uses reverse-dependency information from deps.dev rather than relying on PyPI download counts.
+
+### Complexity measurement
+
+Cyclomatic complexity is measured with `lizard` for all supported source files so the metric is consistent across languages. Python files additionally use the built-in AST to preserve qualified function names, method boundaries, and line spans. Complexity-bucket plots use 10 fixed-width buckets with clean integer bounds, and the upper edge of the final bucket is rounded up to the nearest multiple of 10.
+
+### Bug-fix identification
+
+Bug-fix commits are identified with a commit-message heuristic using tokens such as `fix`, `bugfix`, `regression`, and `hotfix`. This keeps the rule explicit, cheap to audit, and easy to describe in the paper.
+
+### SZZ attribution
+
+The SZZ stage is intentionally conservative. It traces deleted lines in bug-fix commits back to blamed commits in the parent revision, and it includes a rename-aware fallback for moved files and structurally matched renamed functions. The same configurable rename matcher also drives the bug-fix before/after complexity comparison. By default, a renamed function is accepted when either at least 60% of its span still overlaps, there is any overlap with at most 6 lines of total boundary drift, or a stronger overlap-and-name score clears 0.99 with at most 3 lines of drift. These thresholds live under `[matching.rename]` in `analysis.toml`. It does not attempt issue-link mining or more aggressive semantic reconstruction.
+
+### Caching and repositories
+
+Per-package mining results are cached under `Code/cache/mining/` using the repository state, selected commit window, and analysis parameters. Repositories are kept as full clones under `Code/repos/`; partial clones were avoided because deferred blob hydration interfered with commit-diff materialization during mining. Because the plotting stage can be rerun independently by setting `execution.mode = "plot"`, the saved CSV outputs under `Code/output/` are the contract between compute and reporting.
 
 ## Limitations
 
-- The discovery stage reranks a large practical candidate pool rather than scanning the full PyPI index, because no public first-party endpoint exposes global reverse dependency counts.
-- Function identity is path-and-qualified-name based, so aggressive refactors can reduce longitudinal matching quality.
-- The SZZ phase is a heuristic suitable for exploratory analysis, not a gold-standard defect dataset.
-- When `--max-commits-per-repo` is used, the empirical results describe the bounded recent-commit sample inside the requested time window rather than the full two-year history.
-- `--workers` parallelizes package mining, which usually helps on multi-core machines but can increase memory and disk pressure when several repositories are mined at once.
-- Per-package mining results are cached under `Code/cache/mining/` using the repo HEAD, selected commit window, and analysis parameters; use `--refresh-mining-cache` to bypass that cache.
-- Supported source analysis currently covers Python plus any source-file extension recognized by the installed `lizard` version.
+- The candidate set is a practical sample, not the full PyPI universe.
+- The bug-fix classifier is heuristic and depends on commit-message quality.
+- The SZZ stage is suitable for exploratory empirical analysis, not for constructing a gold-standard defect dataset.
+- Rename-aware matching is conservative and threshold-based; large refactors can still break longitudinal function identity, but the acceptance thresholds are configurable in `[matching.rename]`.
+- When `--max-commits` is used, results describe the bounded recent-commit sample rather than the full history inside the requested time window.
+- Running many workers can improve throughput, but it also increases memory, disk, and Git process pressure.
 
-## Suggested paper framing
+## Using the outputs in the paper
 
-The exported outputs support at least three empirical angles:
+The generated outputs support three main empirical views:
 
-1. Package ecosystem concentration: which libraries dominate the dependency graph.
-2. Complexity-risk relationship: whether more complex functions attract more bug-fix activity.
-3. Complexity introduction hypothesis: whether attributed bug-introducing commits disproportionately increase complexity.
+1. Ecosystem concentration among high-impact Python packages.
+2. The relationship between function complexity and bug-fix activity.
+3. Whether attributed bug-introducing commits tend to coincide with higher complexity.

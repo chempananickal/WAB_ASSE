@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import threading
+import tomllib
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
 from multiprocessing import Manager
@@ -21,17 +22,30 @@ try:
         recent_source_commit_hashes,
         run_git,
     )
-    from helpers.common import LOG_LEVELS, ensure_directory, utc_now
+    from helpers.common import (
+        BUGFIX_EVENT_COLUMNS,
+        FUNCTION_METRIC_COLUMNS,
+        PACKAGE_SUMMARY_COLUMNS,
+        SZZ_COLUMNS,
+        ensure_directory,
+        utc_now,
+    )
+    from helpers.config import AnalysisConfig, load_analysis_config
     from helpers.discovery import build_session, discover_top_packages
     from helpers.models import PackageRecord
     from helpers.progress import configure_logging, consume_progress_events, log_message
     from helpers.reporting import (
+        build_summary_markdown,
         package_records_to_frame,
+        plot_bugfix_complexity_before_after,
+        plot_bugfix_complexity_changes,
+        plot_bugfix_commit_timeline,
         plot_complexity_buckets,
         plot_complexity_scatter,
         plot_package_correlations,
         plot_szz_summary,
         plot_top_packages,
+        write_raw_results_json,
         write_dataframe,
     )
 except ImportError:
@@ -43,115 +57,201 @@ except ImportError:
         recent_source_commit_hashes,
         run_git,
     )
-    from Code.helpers.common import LOG_LEVELS, ensure_directory, utc_now
+    from Code.helpers.common import (
+        BUGFIX_EVENT_COLUMNS,
+        FUNCTION_METRIC_COLUMNS,
+        PACKAGE_SUMMARY_COLUMNS,
+        SZZ_COLUMNS,
+        ensure_directory,
+        utc_now,
+    )
+    from Code.helpers.config import AnalysisConfig, load_analysis_config
     from Code.helpers.discovery import build_session, discover_top_packages
     from Code.helpers.models import PackageRecord
     from Code.helpers.progress import configure_logging, consume_progress_events, log_message
     from Code.helpers.reporting import (
+        build_summary_markdown,
         package_records_to_frame,
+        plot_bugfix_complexity_before_after,
+        plot_bugfix_complexity_changes,
+        plot_bugfix_commit_timeline,
         plot_complexity_buckets,
         plot_complexity_scatter,
         plot_package_correlations,
         plot_szz_summary,
         plot_top_packages,
+        write_raw_results_json,
         write_dataframe,
     )
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments for the analysis pipeline."""
+def result_paths(output_dir: Path) -> dict[str, Path]:
+    """Return the canonical output file locations for one run."""
+
+    return {
+        "top_packages": output_dir / "top_packages.csv",
+        "function_metrics": output_dir / "function_metrics.csv",
+        "package_summary": output_dir / "package_summary.csv",
+        "bugfix_event_metrics": output_dir / "bugfix_event_metrics.csv",
+        "szz_function_attributions": output_dir / "szz_function_attributions.csv",
+        "complexity_bucket_summary": output_dir / "complexity_bucket_summary.csv",
+        "bugfix_complexity_change_summary": output_dir / "bugfix_complexity_change_summary.csv",
+        "bugfix_commit_timeline_summary": output_dir / "bugfix_commit_timeline_summary.csv",
+        "szz_summary": output_dir / "szz_summary.csv",
+        "analysis_summary": output_dir / "analysis_summary.md",
+        "raw_results": output_dir / "raw_function_histories.json",
+        "top_packages_plot": output_dir / "plots" / "top_packages.png",
+        "complexity_scatter_plot": output_dir / "plots" / "complexity_vs_bugfixes.png",
+        "complexity_bucket_plot": output_dir / "plots" / "complexity_bucket_bugfix_share.png",
+        "bugfix_before_after_plot": output_dir / "plots" / "bugfix_complexity_before_after.png",
+        "bugfix_change_plot": output_dir / "plots" / "bugfix_complexity_changes.png",
+        "bugfix_timeline_plot": output_dir / "plots" / "bugfix_commit_timeline.png",
+        "package_correlation_plot": output_dir / "plots" / "package_correlations.png",
+        "szz_plot": output_dir / "plots" / "szz_complexity_changes.png",
+    }
+
+
+def load_existing_frame(target: Path, columns: list[str]) -> pd.DataFrame:
+    """Load a CSV result frame if present, else return an empty frame with stable columns."""
+
+    if target.exists():
+        frame = pd.read_csv(target)
+        for column in columns:
+            if column not in frame.columns:
+                frame[column] = pd.NA
+        return frame.reindex(columns=columns)
+    return pd.DataFrame(columns=columns)
+
+
+def load_existing_results(output_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load previously computed result tables from an output directory."""
+
+    paths = result_paths(output_dir)
+    if not paths["top_packages"].exists():
+        raise FileNotFoundError(
+            f"Plot mode requires an existing result set; missing {paths['top_packages']}"
+        )
+    packages_df = pd.read_csv(paths["top_packages"])
+    function_df = load_existing_frame(paths["function_metrics"], FUNCTION_METRIC_COLUMNS)
+    package_summary = load_existing_frame(paths["package_summary"], PACKAGE_SUMMARY_COLUMNS)
+    bugfix_event_df = load_existing_frame(paths["bugfix_event_metrics"], BUGFIX_EVENT_COLUMNS)
+    szz_df = load_existing_frame(paths["szz_function_attributions"], SZZ_COLUMNS)
+    return packages_df, function_df, package_summary, bugfix_event_df, szz_df
+
+
+def render_plots_and_summaries(
+    packages_df: pd.DataFrame,
+    function_df: pd.DataFrame,
+    package_summary: pd.DataFrame,
+    bugfix_event_df: pd.DataFrame,
+    szz_df: pd.DataFrame,
+    output_dir: Path,
+    analysis_years: float,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Render plots and derived summaries from existing result tables."""
+
+    paths = result_paths(output_dir)
+    log_message("Generating plots and summaries.")
+    if not packages_df.empty:
+        plot_top_packages(packages_df, paths["top_packages_plot"])
+    if not function_df.empty:
+        plot_complexity_scatter(function_df, paths["complexity_scatter_plot"])
+        bucket_summary = plot_complexity_buckets(function_df, paths["complexity_bucket_plot"])
+    else:
+        bucket_summary = pd.DataFrame(
+            columns=[
+                "complexity_bucket",
+                "functions",
+                "bugfixed_functions",
+                "mean_bugfix_commits",
+                "bugfix_share",
+            ]
+        )
+    if not bugfix_event_df.empty:
+        plot_bugfix_complexity_before_after(bugfix_event_df, paths["bugfix_before_after_plot"])
+        bugfix_change_summary = plot_bugfix_complexity_changes(
+            bugfix_event_df,
+            paths["bugfix_change_plot"],
+        )
+        bugfix_timeline_summary = plot_bugfix_commit_timeline(
+            bugfix_event_df,
+            paths["bugfix_timeline_plot"],
+            analysis_years=analysis_years,
+        )
+    else:
+        bugfix_change_summary = pd.DataFrame(
+            columns=["category", "count", "share"]
+        )
+        bugfix_timeline_summary = pd.DataFrame(
+            columns=["period_start", "period_label", "count"]
+        )
+    if not package_summary.empty:
+        plot_package_correlations(package_summary, paths["package_correlation_plot"])
+    szz_summary = plot_szz_summary(szz_df, paths["szz_plot"])
+    write_dataframe(bucket_summary, paths["complexity_bucket_summary"])
+    write_dataframe(bugfix_change_summary, paths["bugfix_complexity_change_summary"])
+    write_dataframe(bugfix_timeline_summary, paths["bugfix_commit_timeline_summary"])
+    write_dataframe(szz_summary, paths["szz_summary"])
+    write_raw_results_json(
+        packages_df=packages_df,
+        function_df=function_df,
+        package_summary=package_summary,
+        bugfix_event_df=bugfix_event_df,
+        szz_df=szz_df,
+        target=paths["raw_results"],
+    )
+    paths["analysis_summary"].write_text(
+        build_summary_markdown(
+            packages_df=packages_df,
+            function_df=function_df,
+            package_summary=package_summary,
+            bucket_summary=bucket_summary,
+            szz_summary=szz_summary,
+        ),
+        encoding="utf-8",
+    )
+    return bucket_summary, bugfix_change_summary, bugfix_timeline_summary, szz_summary
+
+
+def parse_args() -> AnalysisConfig:
+    """Parse the minimal CLI and load the TOML configuration file."""
 
     code_dir = Path(__file__).resolve().parent
+    default_cfg = code_dir / "analysis.toml"
     parser = argparse.ArgumentParser(
-        description="Analyze reverse dependencies and bug-fix patterns in Python packages."
-    )
-    parser.add_argument("--top-n", type=int, default=10, help="Number of packages to analyze.")
-    parser.add_argument(
-        "--candidate-pool",
-        type=int,
-        default=250,
-        help="Downloaded package candidates reranked by direct dependents.",
+        description="Analyze reverse dependencies and bug-fix patterns in Python packages.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog=(
+            "All runtime settings live in a TOML config file grouped by concern. "
+            f"By default, the checked-in config at {default_cfg} is used."
+        ),
     )
     parser.add_argument(
-        "--years",
-        type=float,
-        default=2.0,
-        help="Analysis window in years for commit mining.",
-    )
-    parser.add_argument(
-        "--output-dir",
+        "-c",
+        "--cfg",
+        dest="config_path",
         type=Path,
-        default=code_dir / "output" / "latest",
-        help="Directory for plots, tables, and summaries.",
+        default=default_cfg,
+        help="Path to the TOML configuration file.",
     )
-    parser.add_argument(
-        "--cache-dir",
-        type=Path,
-        default=code_dir / "cache",
-        help="Directory for cached HTTP responses.",
-    )
-    parser.add_argument(
-        "--repos-dir",
-        type=Path,
-        default=code_dir / "repos",
-        help="Directory where source repositories are cloned.",
-    )
-    parser.add_argument(
-        "--max-szz-commits-per-repo",
-        type=int,
-        default=None,
-        help="Optional cap for SZZ bug-fix commits per repository.",
-    )
-    parser.add_argument(
-        "--max-commits-per-repo",
-        type=int,
-        default=None,
-        help="Optional cap for the most recent Python commits mined per repository.",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=None,
-        help="Optional number of worker processes for per-package mining.",
-    )
-    parser.add_argument(
-        "--log-level",
-        choices=tuple(LOG_LEVELS),
-        default="INFO",
-        help="Terminal log verbosity for phase updates and progress messages.",
-    )
-    parser.add_argument(
-        "--refresh-mining-cache",
-        action="store_true",
-        help="Ignore cached per-package mining results and recompute them.",
-    )
-    parser.add_argument(
-        "--skip-szz",
-        action="store_true",
-        help="Skip the simplified SZZ pass if you only want the correlation analysis.",
-    )
-    parser.add_argument(
-        "--discovery-only",
-        action="store_true",
-        help="Stop after package discovery and metadata export.",
-    )
-    parser.add_argument(
-        "--include-tests",
-        action="store_true",
-        help="Include test and example files in the function-level analysis.",
-    )
-    parser.add_argument(
-        "--python-only",
-        action="store_true",
-        help="Restrict mining and complexity analysis to Python files only.",
-    )
-    return parser.parse_args()
+    parsed = parser.parse_args()
+    try:
+        return load_analysis_config(parsed.config_path)
+    except (FileNotFoundError, tomllib.TOMLDecodeError, ValueError) as exc:
+        parser.error(str(exc))
 
 
 def main() -> None:
-    """Run the end-to-end package ecosystem analysis."""
+    """Run the end-to-end package ecosystem analysis.
+
+    Notes
+    -----
+    This entrypoint orchestrates package discovery, repository preparation,
+    bounded mining, SZZ attribution, plotting, and CSV export.
+    """
 
     args = parse_args()
+    skip_szz = args.max_szz_commits_per_repo == 0
     configure_logging(args.log_level)
     output_dir = args.output_dir.resolve()
     cache_dir = args.cache_dir.resolve()
@@ -160,13 +260,43 @@ def main() -> None:
     ensure_directory(cache_dir)
     ensure_directory(repos_dir)
 
-    phase_names = ["discovery", "plots"] if args.discovery_only else [
-        "discovery",
-        "repo prep",
-        "mining+szz",
-        "plots",
-        "csv export",
-    ]
+    if args.mode == "plot":
+        phase_names = ["load results", "plots+summaries"]
+        phase_bar = tqdm(
+            total=len(phase_names),
+            desc=f"phase [{phase_names[0]}]",
+            position=0,
+            dynamic_ncols=True,
+            unit="phase",
+        )
+        log_message(f"Loading existing results from {output_dir}.")
+        packages_df, function_df, package_summary, bugfix_event_df, szz_df = load_existing_results(output_dir)
+        phase_bar.update(1)
+        phase_bar.set_description_str("phase [plots+summaries]")
+        render_plots_and_summaries(
+            packages_df,
+            function_df,
+            package_summary,
+            bugfix_event_df,
+            szz_df,
+            output_dir,
+            analysis_years=args.years,
+        )
+        phase_bar.update(1)
+        phase_bar.set_description_str("phase [done]")
+        phase_bar.close()
+        log_message(f"Finished. CSVs and plots are in {output_dir}.")
+        return
+
+    phase_names = ["discovery"] if args.discovery_only and args.mode == "compute" else (
+        ["discovery", "plots+summaries"]
+        if args.discovery_only
+        else (
+            ["discovery", "repo prep", "mining+szz", "csv export"]
+            if args.mode == "compute"
+            else ["discovery", "repo prep", "mining+szz", "csv export", "plots+summaries"]
+        )
+    )
     phase_bar = tqdm(
         total=len(phase_names),
         desc=f"phase [{phase_names[0]}]",
@@ -205,10 +335,18 @@ def main() -> None:
     phase_bar.update(1)
 
     if args.discovery_only:
-        phase_bar.set_description_str("phase [plots]")
-        log_message("Plotting discovery output.")
-        plot_top_packages(packages_df, output_dir / "plots" / "top_packages.png")
-        phase_bar.update(1)
+        if args.mode == "both":
+            phase_bar.set_description_str("phase [plots+summaries]")
+            render_plots_and_summaries(
+                packages_df,
+                pd.DataFrame(columns=FUNCTION_METRIC_COLUMNS),
+                pd.DataFrame(columns=PACKAGE_SUMMARY_COLUMNS),
+                pd.DataFrame(columns=BUGFIX_EVENT_COLUMNS),
+                pd.DataFrame(columns=SZZ_COLUMNS),
+                output_dir,
+                analysis_years=args.years,
+            )
+            phase_bar.update(1)
         phase_bar.set_description_str("phase [done]")
         phase_bar.close()
         log_message(f"Finished. CSVs and plots are in {output_dir}.")
@@ -217,6 +355,7 @@ def main() -> None:
     since_date = utc_now() - timedelta(days=int(args.years * 365.25))
     function_frames: list[pd.DataFrame] = []
     package_frames: list[pd.DataFrame] = []
+    bugfix_event_frames: list[pd.DataFrame] = []
     szz_frames: list[pd.DataFrame] = []
     package_tasks: list[tuple[PackageRecord, Path, list[str], str, dict[str, object]]] = []
 
@@ -255,9 +394,10 @@ def main() -> None:
             repo_head=repo_head,
             include_tests=args.include_tests,
             python_only=args.python_only,
-            skip_szz=args.skip_szz,
+            skip_szz=skip_szz,
             max_szz_commits_per_repo=args.max_szz_commits_per_repo,
             max_commits_per_repo=args.max_commits_per_repo,
+            rename_match=args.rename_match,
             commit_hashes=commit_hashes,
         )
         cached_result = None
@@ -271,9 +411,11 @@ def main() -> None:
             log_message(
                 f"Cache hit | {package.name}: reusing {len(commit_hashes)} commit-window result."
             )
-            function_df, package_summary, szz_df = cached_result
+            function_df, package_summary, bugfix_event_df, szz_df = cached_result
             function_frames.append(function_df)
             package_frames.append(package_summary)
+            if not bugfix_event_df.empty:
+                bugfix_event_frames.append(bugfix_event_df)
             if not szz_df.empty:
                 szz_frames.append(szz_df)
         else:
@@ -315,15 +457,16 @@ def main() -> None:
         try:
             if max_workers == 1:
                 for package, repo_path, commit_hashes, cache_key, cache_metadata in package_tasks:
-                    function_df, package_summary, szz_df = mine_package_task(
+                    function_df, package_summary, bugfix_event_df, szz_df = mine_package_task(
                         package=package,
                         repo_path=repo_path,
                         commit_hashes=commit_hashes,
                         include_tests=args.include_tests,
                         python_only=args.python_only,
-                        skip_szz=args.skip_szz,
+                        skip_szz=skip_szz,
                         max_szz_commits_per_repo=args.max_szz_commits_per_repo,
                         max_commits_per_repo=args.max_commits_per_repo,
+                        rename_match=args.rename_match,
                         progress_queue=progress_queue,
                         cache_dir=cache_dir,
                         cache_key=cache_key,
@@ -331,6 +474,8 @@ def main() -> None:
                     )
                     function_frames.append(function_df)
                     package_frames.append(package_summary)
+                    if not bugfix_event_df.empty:
+                        bugfix_event_frames.append(bugfix_event_df)
                     if not szz_df.empty:
                         szz_frames.append(szz_df)
             else:
@@ -343,9 +488,10 @@ def main() -> None:
                             commit_hashes,
                             args.include_tests,
                             args.python_only,
-                            args.skip_szz,
+                            skip_szz,
                             args.max_szz_commits_per_repo,
                             args.max_commits_per_repo,
+                            args.rename_match,
                             progress_queue,
                             cache_dir,
                             cache_key,
@@ -356,11 +502,13 @@ def main() -> None:
                     for future in as_completed(future_to_package):
                         package_name = future_to_package[future]
                         try:
-                            function_df, package_summary, szz_df = future.result()
+                            function_df, package_summary, bugfix_event_df, szz_df = future.result()
                         except Exception as exc:
                             raise RuntimeError(f"Failed while mining package {package_name}") from exc
                         function_frames.append(function_df)
                         package_frames.append(package_summary)
+                        if not bugfix_event_df.empty:
+                            bugfix_event_frames.append(bugfix_event_df)
                         if not szz_df.empty:
                             szz_frames.append(szz_df)
         finally:
@@ -377,36 +525,41 @@ def main() -> None:
 
     function_df = pd.concat(function_frames, ignore_index=True) if function_frames else pd.DataFrame()
     package_summary = pd.concat(package_frames, ignore_index=True) if package_frames else pd.DataFrame()
+    bugfix_event_df = (
+        pd.concat(bugfix_event_frames, ignore_index=True) if bugfix_event_frames else pd.DataFrame(columns=BUGFIX_EVENT_COLUMNS)
+    )
     szz_df = pd.concat(szz_frames, ignore_index=True) if szz_frames else pd.DataFrame()
-
-    phase_bar.set_description_str("phase [plots]")
-    log_message("Generating plots.")
-    if not packages_df.empty:
-        plot_top_packages(packages_df, output_dir / "plots" / "top_packages.png")
-    if not function_df.empty:
-        plot_complexity_scatter(function_df, output_dir / "plots" / "complexity_vs_bugfixes.png")
-        bucket_summary = plot_complexity_buckets(
-            function_df, output_dir / "plots" / "complexity_bucket_bugfix_share.png"
-        )
-    else:
-        bucket_summary = pd.DataFrame(
-            columns=["complexity_bucket", "functions", "bugfixed_functions", "mean_bugfix_commits", "bugfix_share"]
-        )
-    if not package_summary.empty:
-        plot_package_correlations(
-            package_summary, output_dir / "plots" / "package_correlations.png"
-        )
-    szz_summary = plot_szz_summary(szz_df, output_dir / "plots" / "szz_complexity_changes.png")
-    phase_bar.update(1)
 
     phase_bar.set_description_str("phase [csv export]")
     log_message("Writing CSV outputs.")
-    write_dataframe(function_df, output_dir / "function_metrics.csv")
-    write_dataframe(package_summary, output_dir / "package_summary.csv")
-    write_dataframe(szz_df, output_dir / "szz_function_attributions.csv")
-    write_dataframe(bucket_summary, output_dir / "complexity_bucket_summary.csv")
-    write_dataframe(szz_summary, output_dir / "szz_summary.csv")
+    paths = result_paths(output_dir)
+    write_dataframe(function_df, paths["function_metrics"])
+    write_dataframe(package_summary, paths["package_summary"])
+    write_dataframe(bugfix_event_df, paths["bugfix_event_metrics"])
+    write_dataframe(szz_df, paths["szz_function_attributions"])
+    write_raw_results_json(
+        packages_df=packages_df,
+        function_df=function_df,
+        package_summary=package_summary,
+        bugfix_event_df=bugfix_event_df,
+        szz_df=szz_df,
+        target=paths["raw_results"],
+    )
     phase_bar.update(1)
+
+    if args.mode == "both":
+        phase_bar.set_description_str("phase [plots+summaries]")
+        render_plots_and_summaries(
+            packages_df,
+            function_df,
+            package_summary,
+            bugfix_event_df,
+            szz_df,
+            output_dir,
+            analysis_years=args.years,
+        )
+        phase_bar.update(1)
+
     phase_bar.set_description_str("phase [done]")
     phase_bar.close()
     log_message(f"Finished. CSVs and plots are in {output_dir}.")
