@@ -7,6 +7,7 @@ import json
 import math
 import re
 import subprocess
+import warnings
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -17,6 +18,8 @@ from scipy.stats import pearsonr, spearmanr
 
 from .common import (
     BUGFIX_EVENT_COLUMNS,
+    EXCLUDED_DOCUMENTATION_EXTENSIONS,
+    EXCLUDED_DOCUMENTATION_PATH_PARTS,
     EXCLUDED_PATH_PARTS,
     FUNCTION_METRIC_COLUMNS,
     LIZARD_SOURCE_EXTENSIONS,
@@ -94,7 +97,9 @@ def parse_python_functions(source: str, file_path: str) -> list[ParsedFunction]:
     """
 
     try:
-        tree = ast.parse(source, filename=file_path)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(source, filename=file_path)
     except SyntaxError:
         return []
 
@@ -349,11 +354,20 @@ def functions_for_lines(
 def should_analyze_path(path: str | None, include_tests: bool, python_only: bool = False) -> bool:
     """Decide whether a supported source file should be included in the analysis."""
 
-    if not path or Path(path).suffix.lower() not in selected_source_extensions(python_only):
+    if not path:
         return False
 
-    path_parts = {part.lower() for part in Path(path).parts}
-    file_name = Path(path).name.lower()
+    normalized_path = Path(path)
+    extension = normalized_path.suffix.lower()
+    if extension in EXCLUDED_DOCUMENTATION_EXTENSIONS:
+        return False
+    if extension not in selected_source_extensions(python_only):
+        return False
+
+    path_parts = {part.lower() for part in normalized_path.parts}
+    file_name = normalized_path.name.lower()
+    if path_parts & EXCLUDED_DOCUMENTATION_PATH_PARTS:
+        return False
     if not include_tests:
         if path_parts & EXCLUDED_PATH_PARTS:
             return False

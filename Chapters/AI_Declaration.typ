@@ -113,4 +113,24 @@
     prompt: [Replace the many CLI flags with a TOML config file, keep only --cfg in the CLI, and make rename-matching thresholds configurable.],
     usage: [Introduced TOML-based configuration and configurable rename matching.],
   ),
+  (
+    system: [GitHub Copilot 23],
+    prompt: [Add config validation, timeline granularity options, and clearer config comments.],
+    usage: [Added stricter config validation and documented config options.],
+  ),
+  (
+    system: [GitHub Copilot 24],
+    prompt: [Replace the less useful plot, improve the reporting plots, and make the bucket ranges clearer.],
+    usage: [Reworked plots and simplified the complexity buckets.],
+  ),
+  (
+    system: [GitHub Copilot 25],
+    prompt: [Preserve full commit messages in raw JSON and regenerate compact CSV messages from that source.],
+    usage: [Made raw JSON the source of truth for compact message exports.],
+  ),
+  (
+    system: [GitHub Copilot 26],
+    prompt: [Exclude documentation files from the complexity and SZZ analysis.],
+    usage: [Excluded documentation files from analysis inputs.],
+  ),
 )

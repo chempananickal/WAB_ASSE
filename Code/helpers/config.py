@@ -13,6 +13,7 @@ except ImportError:
 
 
 VALID_MODES = {"compute", "plot", "both"}
+VALID_TIMELINE_GRANULARITIES = {"auto", "month", "quarter", "year"}
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,18 @@ class RenameMatchConfig:
     max_boundary_distance_with_overlap: int = 6
     min_score: float = 0.99
     max_boundary_distance_for_score: int = 3
+
+    def __post_init__(self) -> None:
+        assert 0 <= self.min_overlap_ratio <= 1, (
+            "matching.rename.min_overlap_ratio must be between 0 and 1."
+        )
+        assert self.max_boundary_distance_with_overlap >= 0, (
+            "matching.rename.max_boundary_distance_with_overlap must be 0 or greater."
+        )
+        assert self.min_score >= 0, "matching.rename.min_score must be 0 or greater."
+        assert self.max_boundary_distance_for_score >= 0, (
+            "matching.rename.max_boundary_distance_for_score must be 0 or greater."
+        )
 
     def as_dict(self) -> dict[str, float | int]:
         return {
@@ -53,10 +66,38 @@ class AnalysisConfig:
     mode: str
     log_level: str
     refresh_mining_cache: bool
+    bugfix_timeline_granularity: str
     discovery_only: bool
     include_tests: bool
     python_only: bool
     rename_match: RenameMatchConfig = field(default_factory=RenameMatchConfig)
+
+    def __post_init__(self) -> None:
+        assert self.top_n > 0, "discovery.top_n must be greater than 0."
+        assert self.candidate_pool > 0, "discovery.candidate_pool must be greater than 0."
+        assert self.candidate_pool >= self.top_n, (
+            "discovery.candidate_pool must be greater than or equal to discovery.top_n."
+        )
+        assert self.years > 0, "mining.years must be greater than 0."
+        assert self.max_szz_commits_per_repo is None or self.max_szz_commits_per_repo >= 0, (
+            "mining.max_szz_commits_per_repo must be 0 or greater when set."
+        )
+        assert self.max_commits_per_repo is None or self.max_commits_per_repo > 0, (
+            "mining.max_commits_per_repo must be greater than 0 when set."
+        )
+        assert self.workers is None or self.workers > 0, (
+            "execution.workers must be greater than 0 when set."
+        )
+        assert self.mode in VALID_MODES, (
+            "execution.mode must be one of: " + ", ".join(sorted(VALID_MODES))
+        )
+        assert self.bugfix_timeline_granularity in VALID_TIMELINE_GRANULARITIES, (
+            "execution.bugfix_timeline_granularity must be one of: "
+            + ", ".join(sorted(VALID_TIMELINE_GRANULARITIES))
+        )
+        assert self.log_level in LOG_LEVELS, (
+            "execution.log_level must be one of: " + ", ".join(LOG_LEVELS)
+        )
 
 
 def _require_table(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -153,7 +194,7 @@ def load_analysis_config(config_path: Path) -> AnalysisConfig:
     _require_known_keys(
         execution,
         "execution",
-        {"workers", "mode", "log_level", "refresh_mining_cache"},
+        {"workers", "mode", "log_level", "refresh_mining_cache", "bugfix_timeline_granularity"},
     )
     _require_known_keys(matching, "matching", {"rename"})
     _require_known_keys(
@@ -177,30 +218,10 @@ def load_analysis_config(config_path: Path) -> AnalysisConfig:
     mode = _read_string(execution, "mode", "both")
     log_level = _read_string(execution, "log_level", "INFO").upper()
     refresh_mining_cache = _read_bool(execution, "refresh_mining_cache", False)
+    bugfix_timeline_granularity = _read_string(execution, "bugfix_timeline_granularity", "auto").lower()
     discovery_only = _read_bool(discovery, "discovery_only", False)
     include_tests = _read_bool(mining, "include_tests", False)
     python_only = _read_bool(mining, "python_only", False)
-
-    if top_n <= 0:
-        raise ValueError("discovery.top_n must be greater than 0.")
-    if candidate_pool <= 0:
-        raise ValueError("discovery.candidate_pool must be greater than 0.")
-    if candidate_pool < top_n:
-        raise ValueError("discovery.candidate_pool must be greater than or equal to discovery.top_n.")
-    if years <= 0:
-        raise ValueError("mining.years must be greater than 0.")
-    if max_szz_commits_per_repo is not None and max_szz_commits_per_repo < 0:
-        raise ValueError("mining.max_szz_commits_per_repo must be 0 or greater when set.")
-    if max_commits_per_repo is not None and max_commits_per_repo <= 0:
-        raise ValueError("mining.max_commits_per_repo must be greater than 0 when set.")
-    if workers is not None and workers <= 0:
-        raise ValueError("execution.workers must be greater than 0 when set.")
-    if mode not in VALID_MODES:
-        allowed = ", ".join(sorted(VALID_MODES))
-        raise ValueError(f"execution.mode must be one of: {allowed}")
-    if log_level not in LOG_LEVELS:
-        allowed = ", ".join(LOG_LEVELS)
-        raise ValueError(f"execution.log_level must be one of: {allowed}")
 
     rename_match = RenameMatchConfig(
         min_overlap_ratio=_read_float(rename_matching, "min_overlap_ratio", DEFAULT_RENAME_MATCH_CONFIG.min_overlap_ratio),
@@ -216,14 +237,6 @@ def load_analysis_config(config_path: Path) -> AnalysisConfig:
             DEFAULT_RENAME_MATCH_CONFIG.max_boundary_distance_for_score,
         ),
     )
-    if not 0 <= rename_match.min_overlap_ratio <= 1:
-        raise ValueError("matching.rename.min_overlap_ratio must be between 0 and 1.")
-    if rename_match.max_boundary_distance_with_overlap < 0:
-        raise ValueError("matching.rename.max_boundary_distance_with_overlap must be 0 or greater.")
-    if rename_match.min_score < 0:
-        raise ValueError("matching.rename.min_score must be 0 or greater.")
-    if rename_match.max_boundary_distance_for_score < 0:
-        raise ValueError("matching.rename.max_boundary_distance_for_score must be 0 or greater.")
 
     return AnalysisConfig(
         config_path=config_path,
@@ -239,6 +252,7 @@ def load_analysis_config(config_path: Path) -> AnalysisConfig:
         mode=mode,
         log_level=log_level,
         refresh_mining_cache=refresh_mining_cache,
+        bugfix_timeline_granularity=bugfix_timeline_granularity,
         discovery_only=discovery_only,
         include_tests=include_tests,
         python_only=python_only,

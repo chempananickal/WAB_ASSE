@@ -1,50 +1,89 @@
 # Reverse-dependency discovery settings.
 [discovery]
+
+# Number of packages kept after reranking the candidate pool by reverse
+# dependency counts.
 top_n = 10
+
+# Number of packages fetched before reranking. Must be at least top_n.
 candidate_pool = 250
+
+# If true, stop after writing the discovered package list and skip mining.
+# Options: true, false.
 discovery_only = false
 
 # Output, cache, and repository paths. Relative paths resolve from this file.
 [paths]
+
+# Directory for generated CSV, JSON, Markdown, and plot outputs.
 output_dir = "output/latest"
+
+# Directory for HTTP responses and per-package mining cache entries.
 cache_dir = "cache"
+
+# Directory where source repositories are cloned or updated for mining.
 repos_dir = "repos"
 
 # Mining and SZZ settings.
 [mining]
+
+# Lookback window, in years, used to choose recent commits for analysis.
 years = 2.0
 
 # Set this to 0 to disable SZZ entirely. Omit the key to leave it uncapped.
+# Purpose: limit how many bug-fix commits per repository enter the SZZ phase.
 # max_szz_commits_per_repo = 50
 
 # Omit this key to mine every eligible commit inside the time window.
+# Purpose: limit the number of recent source commits mined per repository.
 # max_commits_per_repo = 250
 
+# If true, include tests and example files in function-level analysis.
+# Options: true, false.
 include_tests = false
+
+# If true, restrict mining and complexity analysis to Python files only.
+# Options: true, false.
 python_only = false
 
 # Execution and rendering settings.
 [execution]
 
 # Omit this key to let the pipeline choose a worker count automatically.
+# Purpose: number of worker processes used for per-package mining.
 workers = 4
 
+# Choose whether to compute fresh results, render from existing outputs, or do both in one run.
+# Options: "compute", "plot", "both".
 mode = "both"
+
+# Terminal log verbosity.
+# Options: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL".
 log_level = "INFO"
+
+# If true, ignore cached mining results and recompute them.
+# Options: true, false.
 refresh_mining_cache = false
+
+# Choose auto, month, quarter, or year for the bug-fix timeline plot.
+# "auto" keeps the previous behavior: months for windows up to 2 years, otherwise years.
+# Options: "auto", "month", "quarter", "year".
+bugfix_timeline_granularity = "auto"
 
 # Rename-matching thresholds shared by bug-fix before/after analysis and SZZ.
 [matching.rename]
 
-# Accept a structural rename immediately when at least this fraction of the
-# function span still overlaps after the change.
+# Accept a structural rename immediately when at least this fraction of the function span still overlaps after the change.
+# Purpose: ratio threshold between 0 and 1.
 min_overlap_ratio = 0.6
 
-# Accept a match when there is some overlap and the start/end boundaries moved
-# by at most this many total lines.
+# Accept a match when there is some overlap and the start/end boundaries moved by at most this many total lines.
+# Purpose: looser line-distance tolerance when overlap exists.
 max_boundary_distance_with_overlap = 6
 
-# Otherwise accept only when the combined overlap/name score is at least this
-# high and the total boundary shift stays within the tighter limit below.
+# Otherwise accept only when the combined overlap/name score is at least this high and the total boundary shift stays within the tighter limit below.
+# Purpose: stricter score threshold for borderline rename matches.
 min_score = 0.99
+
+# Purpose: tighter boundary-distance cap paired with min_score.
 max_boundary_distance_for_score = 3

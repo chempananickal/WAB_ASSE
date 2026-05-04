@@ -96,7 +96,7 @@ The TOML config is grouped by concern:
 - `[discovery]`: package selection and whether to stop after discovery.
 - `[paths]`: output, cache, and repository locations.
 - `[mining]`: lookback window, optional commit caps, test inclusion, and Python-only filtering.
-- `[execution]`: worker count, compute versus plot mode, logging, and cache refresh behavior.
+- `[execution]`: worker count, compute versus plot mode, logging, cache refresh behavior, and bug-fix timeline granularity.
 - `[matching.rename]`: thresholds that decide when a function move or rename is still trusted as the same logical function.
 
 Relative paths in `[paths]` resolve from the directory containing the config file.
@@ -126,6 +126,13 @@ Render plots and summaries only:
 ```toml
 [execution]
 mode = "plot"
+```
+
+Show the bug-fix timeline by quarter instead of month or year:
+
+```toml
+[execution]
+bugfix_timeline_granularity = "quarter"
 ```
 
 Restrict the analysis to Python files only:
@@ -165,8 +172,12 @@ By default, results are written to `Code/output/latest/`.
 - `package_summary.csv`: per-package aggregates and correlation statistics.
 - `bugfix_event_metrics.csv`: one row per bugfix-touched function with complexity before and after the bug-fix commit.
 - `complexity_bucket_summary.csv`: complexity buckets and bug-fix shares.
+- `hotspot_concentration_summary.csv`: cumulative bug-fix share captured by the most complex functions.
+- `repeat_bugfix_distribution_summary.csv`: recurrence tail showing how often already-bugfixed functions are fixed again.
+- `package_normalized_bugfix_density_summary.csv`: package-level bug-fix and introducing-commit rates normalized by analyzed function count.
 - `bugfix_complexity_change_summary.csv`: summary counts for how bug-fix commits changed function complexity.
 - `szz_function_attributions.csv`: function-level SZZ attribution rows.
+- `szz_fix_lag_summary.csv`: per-package summaries of the time lag between attributed introducing commits and their fixing commits.
 - `szz_summary.csv`: summary counts for the SZZ complexity-change categories.
 - `analysis_summary.md`: Markdown summary of the current result set.
 - `raw_function_histories.json`: grouped raw results keyed by function, including bug-fix events, SZZ attributions, and commit messages.
@@ -174,11 +185,15 @@ By default, results are written to `Code/output/latest/`.
 ### Plots
 
 - `plots/top_packages.png`: reverse-dependency ranking of selected packages.
-- `plots/complexity_vs_bugfixes.png`: scatter plot of function complexity versus bug-fix counts.
 - `plots/complexity_bucket_bugfix_share.png`: bug-fix share by complexity bucket.
+- `plots/hotspot_concentration.png`: cumulative share of bug-fix activity captured by the most complex functions.
+- `plots/repeat_bugfix_distribution.png`: recurrence profile for functions that are bugfixed more than once.
+- `plots/package_normalized_bugfix_density.png`: normalized per-package bug-fix burden comparison.
 - `plots/bugfix_complexity_before_after.png`: complexity before versus after bug-fix commits for touched functions.
 - `plots/bugfix_complexity_changes.png`: categorical view of how bug-fix commits changed function complexity.
+- `plots/bugfix_commit_timeline.png`: bug-fix commit counts over time, grouped by month, quarter, or year depending on config.
 - `plots/package_correlations.png`: package-level correlation view.
+- `plots/szz_fix_lag_distribution.png`: distribution of time-to-fix for attributed bug-introducing commits.
 - `plots/szz_complexity_changes.png`: SZZ complexity-change summary, generated only when SZZ attributions exist.
 
 ## Methodology notes
@@ -189,7 +204,7 @@ The ranking target is ecosystem centrality, not download popularity. The pipelin
 
 ### Complexity measurement
 
-Cyclomatic complexity is measured with `lizard` for all supported source files so the metric is consistent across languages. Python files additionally use the built-in AST to preserve qualified function names, method boundaries, and line spans. Complexity-bucket plots use 10 fixed-width buckets with clean integer bounds, and the upper edge of the final bucket is rounded up to the nearest multiple of 10.
+Cyclomatic complexity is measured with `lizard` for all supported source files so the metric is consistent across languages. Python files additionally use the built-in AST to preserve qualified function names, method boundaries, and line spans. Complexity-bucket plots use clean round-number bucket widths chosen near a 10-bucket target, anchored to the highest complexity reached by bugfixed functions when that information exists. Rarer higher-complexity non-bugfixed outliers are folded into the final bucket so the plot stays focused on the range where bug-fix activity actually appears.
 
 ### Bug-fix identification
 
@@ -214,8 +229,10 @@ Per-package mining results are cached under `Code/cache/mining/` using the repos
 
 ## Using the outputs in the paper
 
-The generated outputs support three main empirical views:
+The generated outputs support several empirical views:
 
 1. Ecosystem concentration among high-impact Python packages.
-2. The relationship between function complexity and bug-fix activity.
-3. Whether attributed bug-introducing commits tend to coincide with higher complexity.
+2. Whether bug-fix activity is concentrated in a relatively small set of complex hotspot functions.
+3. How often already-bugfixed functions become repeat maintenance hotspots.
+4. How bug-fix burden differs across packages after normalizing for analyzed size.
+5. Whether attributed bug-introducing commits tend to coincide with higher complexity and how long those attributed bugs remain latent before they are fixed.

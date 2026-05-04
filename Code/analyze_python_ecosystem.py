@@ -6,7 +6,7 @@ import os
 import threading
 import tomllib
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from multiprocessing import Manager
 from pathlib import Path
 
@@ -28,7 +28,6 @@ try:
         PACKAGE_SUMMARY_COLUMNS,
         SZZ_COLUMNS,
         ensure_directory,
-        utc_now,
     )
     from helpers.config import AnalysisConfig, load_analysis_config
     from helpers.discovery import build_session, discover_top_packages
@@ -36,13 +35,19 @@ try:
     from helpers.progress import configure_logging, consume_progress_events, log_message
     from helpers.reporting import (
         build_summary_markdown,
+        bugfix_event_frame_from_raw_json,
+        load_raw_results_json,
         package_records_to_frame,
         plot_bugfix_complexity_before_after,
         plot_bugfix_complexity_changes,
         plot_bugfix_commit_timeline,
+        plot_hotspot_concentration,
+        plot_package_normalized_bugfix_density,
         plot_complexity_buckets,
-        plot_complexity_scatter,
         plot_package_correlations,
+        plot_repeat_bugfix_distribution,
+        szz_frame_from_raw_json,
+        plot_szz_fix_lag_distribution,
         plot_szz_summary,
         plot_top_packages,
         write_raw_results_json,
@@ -63,7 +68,6 @@ except ImportError:
         PACKAGE_SUMMARY_COLUMNS,
         SZZ_COLUMNS,
         ensure_directory,
-        utc_now,
     )
     from Code.helpers.config import AnalysisConfig, load_analysis_config
     from Code.helpers.discovery import build_session, discover_top_packages
@@ -71,13 +75,19 @@ except ImportError:
     from Code.helpers.progress import configure_logging, consume_progress_events, log_message
     from Code.helpers.reporting import (
         build_summary_markdown,
+        bugfix_event_frame_from_raw_json,
+        load_raw_results_json,
         package_records_to_frame,
         plot_bugfix_complexity_before_after,
         plot_bugfix_complexity_changes,
         plot_bugfix_commit_timeline,
+        plot_hotspot_concentration,
+        plot_package_normalized_bugfix_density,
         plot_complexity_buckets,
-        plot_complexity_scatter,
         plot_package_correlations,
+        plot_repeat_bugfix_distribution,
+        szz_frame_from_raw_json,
+        plot_szz_fix_lag_distribution,
         plot_szz_summary,
         plot_top_packages,
         write_raw_results_json,
@@ -95,20 +105,145 @@ def result_paths(output_dir: Path) -> dict[str, Path]:
         "bugfix_event_metrics": output_dir / "bugfix_event_metrics.csv",
         "szz_function_attributions": output_dir / "szz_function_attributions.csv",
         "complexity_bucket_summary": output_dir / "complexity_bucket_summary.csv",
+        "hotspot_concentration_summary": output_dir / "hotspot_concentration_summary.csv",
+        "repeat_bugfix_distribution_summary": output_dir / "repeat_bugfix_distribution_summary.csv",
+        "package_normalized_bugfix_density_summary": output_dir / "package_normalized_bugfix_density_summary.csv",
         "bugfix_complexity_change_summary": output_dir / "bugfix_complexity_change_summary.csv",
         "bugfix_commit_timeline_summary": output_dir / "bugfix_commit_timeline_summary.csv",
+        "szz_fix_lag_summary": output_dir / "szz_fix_lag_summary.csv",
         "szz_summary": output_dir / "szz_summary.csv",
         "analysis_summary": output_dir / "analysis_summary.md",
+        "analysis_run_details": output_dir / "analysis_run_details.txt",
         "raw_results": output_dir / "raw_function_histories.json",
         "top_packages_plot": output_dir / "plots" / "top_packages.png",
-        "complexity_scatter_plot": output_dir / "plots" / "complexity_vs_bugfixes.png",
         "complexity_bucket_plot": output_dir / "plots" / "complexity_bucket_bugfix_share.png",
+        "hotspot_concentration_plot": output_dir / "plots" / "hotspot_concentration.png",
+        "repeat_bugfix_distribution_plot": output_dir / "plots" / "repeat_bugfix_distribution.png",
+        "package_normalized_bugfix_density_plot": output_dir / "plots" / "package_normalized_bugfix_density.png",
         "bugfix_before_after_plot": output_dir / "plots" / "bugfix_complexity_before_after.png",
         "bugfix_change_plot": output_dir / "plots" / "bugfix_complexity_changes.png",
         "bugfix_timeline_plot": output_dir / "plots" / "bugfix_commit_timeline.png",
         "package_correlation_plot": output_dir / "plots" / "package_correlations.png",
+        "szz_fix_lag_plot": output_dir / "plots" / "szz_fix_lag_distribution.png",
         "szz_plot": output_dir / "plots" / "szz_complexity_changes.png",
     }
+
+
+def format_optional_limit(value: int | None, *, zero_label: str | None = None) -> str:
+    """Format an optional integer limit for human-readable output."""
+
+    if value is None:
+        return "unbounded"
+    if zero_label is not None and value == 0:
+        return zero_label
+    return str(value)
+
+
+def repo_head_snapshot(repo_path: Path, package: PackageRecord) -> dict[str, str]:
+    """Capture the current HEAD commit identity for a prepared repository."""
+
+    lines = run_git(
+        repo_path,
+        "show",
+        "--no-patch",
+        "--format=%H%n%cI%n%s",
+        "HEAD",
+    ).splitlines()
+    commit_hash = lines[0].strip() if len(lines) >= 1 else ""
+    commit_date = lines[1].strip() if len(lines) >= 2 else ""
+    subject = lines[2].strip() if len(lines) >= 3 else ""
+    return {
+        "package": package.name,
+        "repo": package.source_repo or package.source_repo_url,
+        "commit_hash": commit_hash,
+        "commit_date": commit_date,
+        "commit_subject": subject,
+    }
+
+
+def build_analysis_run_details(
+    config: AnalysisConfig,
+    query_started_at_local: datetime,
+    since_date_utc: datetime,
+    packages_df: pd.DataFrame,
+    repo_snapshots: list[dict[str, str]],
+) -> str:
+    """Build a small text summary describing the run context and inputs."""
+
+    query_started_at_utc = query_started_at_local.astimezone(timezone.utc)
+    timezone_name = query_started_at_local.tzname() or "unknown"
+    lines = [
+        "Analysis run details",
+        "",
+        f"Query timestamp (local): {query_started_at_local.isoformat()}",
+        f"Query timezone: {timezone_name}",
+        f"Query timestamp (UTC): {query_started_at_utc.isoformat()}",
+        f"Analysis window start (UTC): {since_date_utc.isoformat()}",
+        "",
+        "Paper-relevant configuration",
+        f"- Config file: {config.config_path}",
+        f"- Requested top N packages: {config.top_n}",
+        f"- Candidate pool size: {config.candidate_pool}",
+        f"- Analysis window (years): {config.years}",
+        f"- Include tests: {config.include_tests}",
+        f"- Python only: {config.python_only}",
+        f"- Max recent source commits per repo: {format_optional_limit(config.max_commits_per_repo)}",
+        f"- Max SZZ blamed commits per repo: {format_optional_limit(config.max_szz_commits_per_repo, zero_label='disabled')}",
+        f"- Bug-fix timeline granularity: {config.bugfix_timeline_granularity}",
+        (
+            "- Rename matching thresholds: "
+            + f"min_overlap_ratio={config.rename_match.min_overlap_ratio}, "
+            + f"max_boundary_distance_with_overlap={config.rename_match.max_boundary_distance_with_overlap}, "
+            + f"min_score={config.rename_match.min_score}, "
+            + f"max_boundary_distance_for_score={config.rename_match.max_boundary_distance_for_score}"
+        ),
+        "",
+        f"Selected packages ({len(packages_df)}):",
+    ]
+    if packages_df.empty:
+        lines.append("- none")
+    else:
+        for record in packages_df.itertuples(index=False):
+            lines.append(
+                f"- #{record.rank} {record.name} {record.version} | direct={record.direct_dependents} | total={record.total_dependents}"
+            )
+
+    lines.extend(["", "Prepared repository HEAD commits:"])
+    if repo_snapshots:
+        for snapshot in repo_snapshots:
+            subject = snapshot["commit_subject"] or "(no subject)"
+            commit_hash = snapshot["commit_hash"] or "unknown"
+            commit_date = snapshot["commit_date"] or "unknown date"
+            lines.append(
+                f"- {snapshot['package']}: {commit_hash} | {commit_date} | {subject}"
+            )
+    else:
+        lines.append("- not collected in this run mode")
+
+    return "\n".join(lines) + "\n"
+
+
+def write_analysis_run_details(
+    config: AnalysisConfig,
+    output_dir: Path,
+    query_started_at_local: datetime,
+    since_date_utc: datetime,
+    packages_df: pd.DataFrame,
+    repo_snapshots: list[dict[str, str]],
+) -> None:
+    """Write the plain-text run details file alongside the other outputs."""
+
+    paths = result_paths(output_dir)
+    paths["analysis_run_details"].write_text(
+        build_analysis_run_details(
+            config=config,
+            query_started_at_local=query_started_at_local,
+            since_date_utc=since_date_utc,
+            packages_df=packages_df,
+            repo_snapshots=repo_snapshots,
+        ),
+        encoding="utf-8",
+    )
 
 
 def load_existing_frame(target: Path, columns: list[str]) -> pd.DataFrame:
@@ -134,8 +269,13 @@ def load_existing_results(output_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame,
     packages_df = pd.read_csv(paths["top_packages"])
     function_df = load_existing_frame(paths["function_metrics"], FUNCTION_METRIC_COLUMNS)
     package_summary = load_existing_frame(paths["package_summary"], PACKAGE_SUMMARY_COLUMNS)
-    bugfix_event_df = load_existing_frame(paths["bugfix_event_metrics"], BUGFIX_EVENT_COLUMNS)
-    szz_df = load_existing_frame(paths["szz_function_attributions"], SZZ_COLUMNS)
+    raw_payload = load_raw_results_json(paths["raw_results"]) if paths["raw_results"].exists() else None
+    if raw_payload is not None:
+        bugfix_event_df = bugfix_event_frame_from_raw_json(raw_payload)
+        szz_df = szz_frame_from_raw_json(raw_payload)
+    else:
+        bugfix_event_df = load_existing_frame(paths["bugfix_event_metrics"], BUGFIX_EVENT_COLUMNS)
+        szz_df = load_existing_frame(paths["szz_function_attributions"], SZZ_COLUMNS)
     return packages_df, function_df, package_summary, bugfix_event_df, szz_df
 
 
@@ -147,6 +287,7 @@ def render_plots_and_summaries(
     szz_df: pd.DataFrame,
     output_dir: Path,
     analysis_years: float,
+    timeline_granularity: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Render plots and derived summaries from existing result tables."""
 
@@ -155,8 +296,15 @@ def render_plots_and_summaries(
     if not packages_df.empty:
         plot_top_packages(packages_df, paths["top_packages_plot"])
     if not function_df.empty:
-        plot_complexity_scatter(function_df, paths["complexity_scatter_plot"])
         bucket_summary = plot_complexity_buckets(function_df, paths["complexity_bucket_plot"])
+        hotspot_concentration_summary = plot_hotspot_concentration(
+            function_df,
+            paths["hotspot_concentration_plot"],
+        )
+        repeat_bugfix_distribution_summary = plot_repeat_bugfix_distribution(
+            function_df,
+            paths["repeat_bugfix_distribution_plot"],
+        )
     else:
         bucket_summary = pd.DataFrame(
             columns=[
@@ -166,6 +314,12 @@ def render_plots_and_summaries(
                 "mean_bugfix_commits",
                 "bugfix_share",
             ]
+        )
+        hotspot_concentration_summary = pd.DataFrame(
+            columns=["function_rank", "function_share", "cumulative_bugfix_share"]
+        )
+        repeat_bugfix_distribution_summary = pd.DataFrame(
+            columns=["bugfix_commits", "functions_at_or_above", "share"]
         )
     if not bugfix_event_df.empty:
         plot_bugfix_complexity_before_after(bugfix_event_df, paths["bugfix_before_after_plot"])
@@ -177,6 +331,7 @@ def render_plots_and_summaries(
             bugfix_event_df,
             paths["bugfix_timeline_plot"],
             analysis_years=analysis_years,
+            granularity=timeline_granularity,
         )
     else:
         bugfix_change_summary = pd.DataFrame(
@@ -187,10 +342,28 @@ def render_plots_and_summaries(
         )
     if not package_summary.empty:
         plot_package_correlations(package_summary, paths["package_correlation_plot"])
+        package_normalized_bugfix_density_summary = plot_package_normalized_bugfix_density(
+            package_summary,
+            paths["package_normalized_bugfix_density_plot"],
+        )
+    else:
+        package_normalized_bugfix_density_summary = pd.DataFrame(
+            columns=["package", "metric", "value"]
+        )
+    if not szz_df.empty:
+        szz_fix_lag_summary = plot_szz_fix_lag_distribution(szz_df, paths["szz_fix_lag_plot"])
+    else:
+        szz_fix_lag_summary = pd.DataFrame(
+            columns=["package", "pair_count", "median_lag_days", "p25_lag_days", "p75_lag_days"]
+        )
     szz_summary = plot_szz_summary(szz_df, paths["szz_plot"])
     write_dataframe(bucket_summary, paths["complexity_bucket_summary"])
+    write_dataframe(hotspot_concentration_summary, paths["hotspot_concentration_summary"])
+    write_dataframe(repeat_bugfix_distribution_summary, paths["repeat_bugfix_distribution_summary"])
+    write_dataframe(package_normalized_bugfix_density_summary, paths["package_normalized_bugfix_density_summary"])
     write_dataframe(bugfix_change_summary, paths["bugfix_complexity_change_summary"])
     write_dataframe(bugfix_timeline_summary, paths["bugfix_commit_timeline_summary"])
+    write_dataframe(szz_fix_lag_summary, paths["szz_fix_lag_summary"])
     write_dataframe(szz_summary, paths["szz_summary"])
     write_raw_results_json(
         packages_df=packages_df,
@@ -237,7 +410,7 @@ def parse_args() -> AnalysisConfig:
     parsed = parser.parse_args()
     try:
         return load_analysis_config(parsed.config_path)
-    except (FileNotFoundError, tomllib.TOMLDecodeError, ValueError) as exc:
+    except (AssertionError, FileNotFoundError, tomllib.TOMLDecodeError, ValueError) as exc:
         parser.error(str(exc))
 
 
@@ -252,6 +425,8 @@ def main() -> None:
 
     args = parse_args()
     skip_szz = args.max_szz_commits_per_repo == 0
+    query_started_at_local = datetime.now().astimezone()
+    since_date = query_started_at_local.astimezone(timezone.utc) - timedelta(days=int(args.years * 365.25))
     configure_logging(args.log_level)
     output_dir = args.output_dir.resolve()
     cache_dir = args.cache_dir.resolve()
@@ -281,6 +456,15 @@ def main() -> None:
             szz_df,
             output_dir,
             analysis_years=args.years,
+            timeline_granularity=args.bugfix_timeline_granularity,
+        )
+        write_analysis_run_details(
+            config=args,
+            output_dir=output_dir,
+            query_started_at_local=query_started_at_local,
+            since_date_utc=since_date,
+            packages_df=packages_df,
+            repo_snapshots=[],
         )
         phase_bar.update(1)
         phase_bar.set_description_str("phase [done]")
@@ -345,19 +529,28 @@ def main() -> None:
                 pd.DataFrame(columns=SZZ_COLUMNS),
                 output_dir,
                 analysis_years=args.years,
+                timeline_granularity=args.bugfix_timeline_granularity,
             )
             phase_bar.update(1)
+        write_analysis_run_details(
+            config=args,
+            output_dir=output_dir,
+            query_started_at_local=query_started_at_local,
+            since_date_utc=since_date,
+            packages_df=packages_df,
+            repo_snapshots=[],
+        )
         phase_bar.set_description_str("phase [done]")
         phase_bar.close()
         log_message(f"Finished. CSVs and plots are in {output_dir}.")
         return
 
-    since_date = utc_now() - timedelta(days=int(args.years * 365.25))
     function_frames: list[pd.DataFrame] = []
     package_frames: list[pd.DataFrame] = []
     bugfix_event_frames: list[pd.DataFrame] = []
     szz_frames: list[pd.DataFrame] = []
     package_tasks: list[tuple[PackageRecord, Path, list[str], str, dict[str, object]]] = []
+    repo_snapshots: list[dict[str, str]] = []
 
     phase_bar.set_description_str("phase [repo prep]")
     prep_bar = tqdm(
@@ -381,7 +574,9 @@ def main() -> None:
         action = "Updating" if repo_target.exists() else "Cloning"
         log_message(f"Repo prep | {action} {package.name} from {package.source_repo or package.source_repo_url}")
         repo_path = ensure_repository(package.source_repo_url, repos_dir=repos_dir)
-        repo_head = run_git(repo_path, "rev-parse", "HEAD").strip()
+        head_snapshot = repo_head_snapshot(repo_path, package)
+        repo_snapshots.append(head_snapshot)
+        repo_head = head_snapshot["commit_hash"]
         commit_hashes = recent_source_commit_hashes(
             repo_path=repo_path,
             since_date=since_date,
@@ -545,6 +740,14 @@ def main() -> None:
         szz_df=szz_df,
         target=paths["raw_results"],
     )
+    write_analysis_run_details(
+        config=args,
+        output_dir=output_dir,
+        query_started_at_local=query_started_at_local,
+        since_date_utc=since_date,
+        packages_df=packages_df,
+        repo_snapshots=repo_snapshots,
+    )
     phase_bar.update(1)
 
     if args.mode == "both":
@@ -557,6 +760,7 @@ def main() -> None:
             szz_df,
             output_dir,
             analysis_years=args.years,
+            timeline_granularity=args.bugfix_timeline_granularity,
         )
         phase_bar.update(1)
 

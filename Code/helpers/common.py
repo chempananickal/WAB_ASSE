@@ -33,6 +33,22 @@ EXCLUDED_PATH_PARTS = {
     "testing",
     "venv",
 }
+EXCLUDED_DOCUMENTATION_PATH_PARTS = {
+    "doc",
+    "docs",
+}
+EXCLUDED_DOCUMENTATION_EXTENSIONS = {
+    ".md",
+    ".markdown",
+    ".mdown",
+    ".mkd",
+    ".mkdn",
+    ".rst",
+    ".txt",
+    ".text",
+    ".adoc",
+    ".asciidoc",
+}
 LOG_LEVELS = {
     "CRITICAL": logging.CRITICAL,
     "ERROR": logging.ERROR,
@@ -40,7 +56,7 @@ LOG_LEVELS = {
     "INFO": logging.INFO,
     "DEBUG": logging.DEBUG,
 }
-MINING_CACHE_VERSION = 8
+MINING_CACHE_VERSION = 9
 SUBPROCESS_TEXT_KWARGS: dict[str, Any] = {
     "text": True,
     "encoding": "utf-8",
@@ -126,7 +142,13 @@ def selected_source_extensions(python_only: bool) -> tuple[str, ...]:
 
     if python_only:
         return tuple(sorted(PYTHON_SOURCE_EXTENSIONS))
-    return SUPPORTED_SOURCE_EXTENSIONS
+    return tuple(
+        sorted(
+            extension
+            for extension in SUPPORTED_SOURCE_EXTENSIONS
+            if extension not in EXCLUDED_DOCUMENTATION_EXTENSIONS
+        )
+    )
 
 
 def selected_source_globs(python_only: bool) -> tuple[str, ...]:
