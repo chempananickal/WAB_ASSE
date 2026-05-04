@@ -318,38 +318,120 @@ def plot_hotspot_concentration(function_df: pd.DataFrame, target: Path) -> pd.Da
 
 
 def plot_repeat_bugfix_distribution(function_df: pd.DataFrame, target: Path) -> pd.DataFrame:
-    """Plot the recurrence tail for bug-fixed functions."""
+    """Plot the exact bug-fix count distribution across analyzed functions."""
 
-    bugfixed = function_df.loc[function_df["n_bugfix_commits"] > 0, ["n_bugfix_commits"]].copy()
-    if bugfixed.empty:
-        return pd.DataFrame(columns=["bugfix_commits", "functions_at_or_above", "share"])
+    if function_df.empty:
+        return pd.DataFrame(columns=["bugfix_commits", "functions_with_exact_count", "share"])
 
-    counts = bugfixed["n_bugfix_commits"].astype(int).value_counts().sort_index()
-    total_bugfixed_functions = int(counts.sum())
-    summary_rows: list[dict[str, float | int]] = []
-    running = 0
-    for bugfix_count in sorted(counts.index, reverse=True):
-        running += int(counts.loc[bugfix_count])
-        summary_rows.append(
-            {
-                "bugfix_commits": int(bugfix_count),
-                "functions_at_or_above": running,
-                "share": running / total_bugfixed_functions,
-            }
-        )
-    summary = pd.DataFrame(summary_rows).sort_values("bugfix_commits").reset_index(drop=True)
+    total_functions = int(len(function_df))
+    counts = function_df["n_bugfix_commits"].fillna(0).astype(int).value_counts().sort_index()
+    max_bugfix_count = int(counts.index.max()) if not counts.empty else 0
+    summary = pd.DataFrame(
+        {
+            "bugfix_commits": list(range(0, max_bugfix_count + 1)),
+        }
+    )
+    summary["functions_with_exact_count"] = summary["bugfix_commits"].map(counts).fillna(0).astype(int)
+    summary["share"] = summary["functions_with_exact_count"] / total_functions
 
     ensure_directory(target.parent)
     plt, sns = load_plotting_modules()
     fig, ax = plt.subplots(figsize=(9, 6))
     sns.lineplot(data=summary, x="bugfix_commits", y="share", marker="o", color="#e76f51", ax=ax)
+    ax.set_xticks(list(range(0, max_bugfix_count + 1)))
     ax.set_xlabel("Bug-fix commits touching a function")
-    ax.set_ylabel("Share of bug-fixed functions at or above that count")
-    ax.set_title("How often do the same functions get fixed repeatedly?")
+    ax.set_ylabel("Share of analyzed functions with exactly that count")
+    ax.set_title("How are bug-fix counts distributed across analyzed functions?")
+    for row in summary.itertuples(index=False):
+        ax.annotate(
+            str(int(row.functions_with_exact_count)),
+            (row.bugfix_commits, row.share),
+            textcoords="offset points",
+            xytext=(0, 6),
+            ha="center",
+            fontsize="small",
+        )
     fig.tight_layout()
     fig.savefig(target, dpi=200)
     plt.close(fig)
     return summary
+
+
+def build_extreme_bugfix_function_table(
+    function_df: pd.DataFrame,
+    bugfix_event_df: pd.DataFrame,
+    top_distinct_counts: int = 3,
+) -> pd.DataFrame:
+    """Build a commit-level table for functions in the highest bug-fix count bands."""
+
+    columns = [
+        "package",
+        "package_rank",
+        "file_path",
+        "function",
+        "kind",
+        "complexity",
+        "n_bugfix_commits",
+        "bugfix_commit",
+        "bugfix_commit_date",
+        "bugfix_message",
+    ]
+    if function_df.empty or bugfix_event_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    distinct_counts = sorted(
+        {
+            int(value)
+            for value in function_df["n_bugfix_commits"].dropna().tolist()
+            if int(value) > 0
+        },
+        reverse=True,
+    )
+    if not distinct_counts:
+        return pd.DataFrame(columns=columns)
+
+    selected_counts = distinct_counts[:top_distinct_counts]
+    extreme_functions = function_df.loc[
+        function_df["n_bugfix_commits"].isin(selected_counts),
+        ["package", "package_rank", "file_path", "function", "kind", "complexity", "n_bugfix_commits"],
+    ].copy()
+    if extreme_functions.empty:
+        return pd.DataFrame(columns=columns)
+
+    event_rows = bugfix_event_df.loc[
+        :,
+        [
+            "package",
+            "after_file_path",
+            "before_file_path",
+            "function",
+            "kind",
+            "bugfix_commit",
+            "bugfix_commit_date",
+            "bugfix_message",
+        ],
+    ].copy()
+    event_rows["file_path"] = event_rows["after_file_path"].fillna(event_rows["before_file_path"])
+    merged = extreme_functions.merge(
+        event_rows[
+            [
+                "package",
+                "file_path",
+                "function",
+                "kind",
+                "bugfix_commit",
+                "bugfix_commit_date",
+                "bugfix_message",
+            ]
+        ],
+        on=["package", "file_path", "function", "kind"],
+        how="left",
+    )
+    merged = merged.sort_values(
+        ["n_bugfix_commits", "package", "file_path", "function", "bugfix_commit_date", "bugfix_commit"],
+        ascending=[False, True, True, True, True, True],
+    ).reset_index(drop=True)
+    return merged.reindex(columns=columns)
 
 
 def plot_package_normalized_bugfix_density(package_summary: pd.DataFrame, target: Path) -> pd.DataFrame:
@@ -373,7 +455,7 @@ def plot_package_normalized_bugfix_density(package_summary: pd.DataFrame, target
     metric_labels = {
         "bugfixed_function_share": "Bug-fixed functions / analyzed functions",
         "bugfix_commit_density": "Bug-fix commits / analyzed functions",
-        "introducing_commit_density": "Unique introducing commits / analyzed functions",
+        "introducing_commit_density": "Unique bug-introducing commits / analyzed functions",
     }
     long_summary["metric"] = long_summary["metric"].map(metric_labels)
     package_order = (
@@ -406,6 +488,8 @@ def plot_complexity_buckets(function_df: pd.DataFrame, target: Path) -> pd.DataF
     """Create a complexity bucket summary plot."""
 
     ensure_directory(target.parent)
+    from matplotlib.ticker import PercentFormatter
+
     plt, sns = load_plotting_modules()
     bucket_df, bucket_labels = assign_complexity_buckets(function_df)
     summary = (
@@ -430,9 +514,25 @@ def plot_complexity_buckets(function_df: pd.DataFrame, target: Path) -> pd.DataF
 
     fig, ax = plt.subplots(figsize=(10, 6))
     sns.barplot(data=summary, x="complexity_bucket", y="bugfix_share", color="#e07a5f", ax=ax)
-    ax.set_xlabel("Complexity bucket")
-    ax.set_ylabel("Share of functions touched by bug-fix commits")
-    ax.set_title("Bug-fix exposure across fixed-width complexity buckets")
+    y_max = float(summary["bugfix_share"].max()) if not summary.empty else 0.0
+    offset = max(y_max * 0.015, 0.01)
+    for patch, row in zip(ax.patches, summary.itertuples(index=False), strict=False):
+        height = patch.get_height()
+        ax.text(
+            patch.get_x() + patch.get_width() / 2,
+            height + offset,
+            f"{int(row.bugfixed_functions)}/{int(row.functions)}\n{float(row.bugfix_share):.1%}",
+            ha="center",
+            va="bottom",
+            fontsize="small",
+            clip_on=False,
+        )
+    if y_max > 0:
+        ax.set_ylim(0, y_max + (offset * 6))
+    ax.set_xlabel("Cyclomatic complexity score")
+    ax.set_ylabel("Percentage of functions touched by bug-fix commits")
+    ax.set_title("Percentage of bug-fixed functions by cyclomatic complexity score")
+    ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0))
     ax.tick_params(axis="x", rotation=15)
     fig.tight_layout()
     fig.savefig(target, dpi=200)
@@ -504,6 +604,21 @@ def plot_bugfix_complexity_changes(bugfix_event_df: pd.DataFrame, target: Path) 
         legend=False,
         ax=ax,
     )
+    y_max = float(summary["count"].max()) if not summary.empty else 0.0
+    offset = max(y_max * 0.01, 0.5)
+    for patch, row in zip(ax.patches, summary.itertuples(index=False), strict=False):
+        height = patch.get_height()
+        ax.text(
+            patch.get_x() + patch.get_width() / 2,
+            height + offset,
+            str(int(row.count)),
+            ha="center",
+            va="bottom",
+            fontsize="small",
+            clip_on=False,
+        )
+    if y_max > 0:
+        ax.set_ylim(0, y_max + (offset * 6))
     ax.set_xlabel("Bug-fix commit category")
     ax.set_ylabel("Touched functions")
     ax.set_title("How do bug-fix commits change function complexity?")
@@ -579,7 +694,7 @@ def plot_bugfix_commit_timeline(
 
 
 def plot_szz_fix_lag_distribution(szz_df: pd.DataFrame, target: Path) -> pd.DataFrame:
-    """Plot the time lag between attributed introducing commits and their fixing commits."""
+    """Plot the time lag between attributed bug-introducing and bug-fixing commits."""
 
     if szz_df.empty:
         return pd.DataFrame(columns=["package", "pair_count", "median_lag_days", "p25_lag_days", "p75_lag_days"])
@@ -620,14 +735,45 @@ def plot_szz_fix_lag_distribution(szz_df: pd.DataFrame, target: Path) -> pd.Data
         .sort_values("median_lag_days", ascending=True)
     )
 
+    def format_years_label(days: float) -> str:
+        years = float(days) / 365.25
+        if years >= 10:
+            return f"median {years:.1f}y"
+        if years >= 1:
+            return f"median {years:.2f}y"
+        return f"median {years:.3f}y"
+
     ensure_directory(target.parent)
     plt, sns = load_plotting_modules()
     fig, ax = plt.subplots(figsize=(11, 6))
-    sns.boxplot(data=lag_df, y="package", x="lag_days", order=summary["package"].tolist(), orient="h", ax=ax)
+    plot_lag_df = lag_df.copy()
+    plot_lag_df["lag_days_plot"] = plot_lag_df["lag_days"].clip(lower=1.0)
+    sns.boxplot(
+        data=plot_lag_df,
+        y="package",
+        x="lag_days_plot",
+        order=summary["package"].tolist(),
+        orient="h",
+        ax=ax,
+    )
     ax.set_xscale("log")
-    ax.set_xlabel("Days between attributed introducing commit and fixing commit (log scale)")
+    ax.set_xlim(left=1.0)
+    for index, row in enumerate(summary.itertuples(index=False)):
+        plotted_median = max(float(row.median_lag_days), 1.0)
+        ax.annotate(
+            format_years_label(float(row.median_lag_days)),
+            (plotted_median, index),
+            textcoords="offset points",
+            xytext=(0, 0),
+            ha="center",
+            va="center",
+            fontsize="small",
+            clip_on=False,
+            bbox={"boxstyle": "round,pad=0.2", "facecolor": "white", "edgecolor": "#8d99ae", "alpha": 0.9},
+        )
+    ax.set_xlabel("Days between attributed bug-introducing and bug-fixing commits (log scale; values < 1 day shown at 1 day)")
     ax.set_ylabel("Package")
-    ax.set_title("How long do attributed bugs stay latent before they are fixed?")
+    ax.set_title("How long do attributed bugs stay latent before a bug-fixing commit?")
     fig.tight_layout()
     fig.savefig(target, dpi=200)
     plt.close(fig)
@@ -715,6 +861,21 @@ def plot_szz_summary(szz_df: pd.DataFrame, target: Path) -> pd.DataFrame:
         legend=False,
         ax=ax,
     )
+    y_max = float(summary["count"].max()) if not summary.empty else 0.0
+    offset = max(y_max * 0.01, 0.5)
+    for patch, row in zip(ax.patches, summary.itertuples(index=False), strict=False):
+        height = patch.get_height()
+        ax.text(
+            patch.get_x() + patch.get_width() / 2,
+            height + offset,
+            str(int(row.count)),
+            ha="center",
+            va="bottom",
+            fontsize="small",
+            clip_on=False,
+        )
+    if y_max > 0:
+        ax.set_ylim(0, y_max + (offset * 6))
     ax.set_xlabel("Bug-introducing commit category")
     ax.set_ylabel("Attributed commits")
     ax.set_title("How did the attributed bug-introducing commit affect complexity?")

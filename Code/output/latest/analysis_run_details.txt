@@ -1,0 +1,43 @@
+Analysis run details
+
+Query timestamp (local): 2026-05-04T14:28:01.481059+02:00
+Query timezone: W. Europe Daylight Time
+Query timestamp (UTC): 2026-05-04T12:28:01.481059+00:00
+Analysis window start (UTC): 2024-05-04T12:28:01.481059+00:00
+
+Configuration summary
+- Config file: C:\Users\rubin\wabs\WAB_ASSE\Code\testcfg.toml
+- Requested top N packages: 10
+- Candidate pool size: 250
+- Analysis window (years): 2.0
+- Functions analyzed: 44439
+- Include tests: False
+- Python only: False
+- Max recent source commits per repo: unbounded
+- Max SZZ blamed commits per repo: unbounded
+- Bug-fix timeline granularity: auto
+- Rename matching thresholds: min_overlap_ratio=0.6, max_boundary_distance_with_overlap=6, min_score=0.99, max_boundary_distance_for_score=3
+
+Selected packages (10):
+- #1 numpy 2.4.4 | direct=85271 | total=142967 | functions_analyzed=7719
+- #2 pandas 3.0.2 | direct=49948 | total=67877 | functions_analyzed=7190
+- #3 pydantic 2.13.3 | direct=40964 | total=89080 | functions_analyzed=3334
+- #4 pyyaml 6.0.3 | direct=36933 | total=105265 | functions_analyzed=368
+- #5 matplotlib 3.10.9 | direct=36840 | total=49245 | functions_analyzed=11007
+- #6 scipy 1.17.1 | direct=35026 | total=65545 | functions_analyzed=13140
+- #7 click 8.3.3 | direct=31406 | total=118190 | functions_analyzed=507
+- #8 tqdm 4.67.3 | direct=26548 | total=71076 | functions_analyzed=221
+- #9 rich 15.0.0 | direct=20231 | total=66195 | functions_analyzed=888
+- #10 python-dotenv 1.2.2 | direct=18977 | total=54478 | functions_analyzed=65
+
+Prepared repository HEAD commits:
+- numpy: 95e275dd9611b9aa1257ad77a812c035ef34e186 | 2026-05-04T09:08:34+02:00 | Merge pull request #31376 from mhvk/iterate-on-aligned-dtype-check
+- pandas: b00d4f6710ff6c1c80319196657c31c2cf6c70ff | 2026-05-03T10:38:52-07:00 | BUG: Timestamp with 1-3 digit BC year silently drops leading '-' (GH-55954) (#65435)
+- pydantic: 1078a0516b1854708915c0157df5fab059cc453b | 2026-05-03T16:57:27+02:00 | Preserve `RootModel` core metadata (#13129)
+- pyyaml: d51d8a138f7230834fc6e95635ff09ebd329185f | 2025-09-25T11:13:58-07:00 | Update CI and Build Targets for Python 3.14 and Windows/arm64 (#864)
+- matplotlib: b98e50bce5a0af51d3d658ead5a1e1e046b194da | 2026-05-02T01:51:57-04:00 | Merge pull request #31594 from timhoffm/doc-sharex-restore-tick-labels
+- scipy: 98471a0067058aaf8b34660fdac94579dabd5199 | 2026-05-04T11:07:35+02:00 | Merge pull request #25093 from dschult/remove_matrix_io_test_py23_compatibility
+- click: fed9049f7a07550d560a91b30c5b0b3e17d54981 | 2026-04-30T23:02:56+01:00 | Move #1572 changelog entry to correct version entry (8.4.0).
+- tqdm: 75bdb6c379bcfc6c592b6342dc791a092b5d6ae0 | 2026-02-03T16:58:32Z | fix py3.7 compat
+- rich: 46cebbb032f920eb096efbaf23cdc6fe9dd541f7 | 2026-04-12T16:40:06+07:00 | fix changelog
+- python-dotenv: bca6644d9aedbe287b792b756b3ae3d650cd0d3a | 2026-04-20T01:09:11+05:30 | fix: strip UTF-8 BOM from .env files (#640)

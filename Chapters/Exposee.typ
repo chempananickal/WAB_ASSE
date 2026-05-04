@@ -3,7 +3,11 @@
 
   = Objectives
 
+  = Background and Related Work
+
   = Methodology
+
+  = Research Questions
 
   = Planned Structure
 

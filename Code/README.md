@@ -173,11 +173,12 @@ By default, results are written to `Code/output/latest/`.
 - `bugfix_event_metrics.csv`: one row per bugfix-touched function with complexity before and after the bug-fix commit.
 - `complexity_bucket_summary.csv`: complexity buckets and bug-fix shares.
 - `hotspot_concentration_summary.csv`: cumulative bug-fix share captured by the most complex functions.
-- `repeat_bugfix_distribution_summary.csv`: recurrence tail showing how often already-bugfixed functions are fixed again.
-- `package_normalized_bugfix_density_summary.csv`: package-level bug-fix and introducing-commit rates normalized by analyzed function count.
+- `repeat_bugfix_distribution_summary.csv`: exact-count distribution showing what share of all analyzed functions have exactly 0, 1, 2, 3, ... bug-fix commits.
+- `extreme_bugfix_function_table.csv`: commit-level table for functions whose bug-fix counts fall into the top three distinct repeat-fix bands in the current result set.
+- `package_normalized_bugfix_density_summary.csv`: package-level bug-fix and bug-introducing-commit rates normalized by analyzed function count.
 - `bugfix_complexity_change_summary.csv`: summary counts for how bug-fix commits changed function complexity.
 - `szz_function_attributions.csv`: function-level SZZ attribution rows.
-- `szz_fix_lag_summary.csv`: per-package summaries of the time lag between attributed introducing commits and their fixing commits.
+- `szz_fix_lag_summary.csv`: per-package summaries of the time lag between attributed bug-introducing and bug-fixing commits.
 - `szz_summary.csv`: summary counts for the SZZ complexity-change categories.
 - `analysis_summary.md`: Markdown summary of the current result set.
 - `raw_function_histories.json`: grouped raw results keyed by function, including bug-fix events, SZZ attributions, and commit messages.
@@ -187,13 +188,13 @@ By default, results are written to `Code/output/latest/`.
 - `plots/top_packages.png`: reverse-dependency ranking of selected packages.
 - `plots/complexity_bucket_bugfix_share.png`: bug-fix share by complexity bucket.
 - `plots/hotspot_concentration.png`: cumulative share of bug-fix activity captured by the most complex functions.
-- `plots/repeat_bugfix_distribution.png`: recurrence profile for functions that are bugfixed more than once.
+- `plots/repeat_bugfix_distribution.png`: exact bug-fix count distribution across analyzed functions.
 - `plots/package_normalized_bugfix_density.png`: normalized per-package bug-fix burden comparison.
 - `plots/bugfix_complexity_before_after.png`: complexity before versus after bug-fix commits for touched functions.
 - `plots/bugfix_complexity_changes.png`: categorical view of how bug-fix commits changed function complexity.
 - `plots/bugfix_commit_timeline.png`: bug-fix commit counts over time, grouped by month, quarter, or year depending on config.
 - `plots/package_correlations.png`: package-level correlation view.
-- `plots/szz_fix_lag_distribution.png`: distribution of time-to-fix for attributed bug-introducing commits.
+- `plots/szz_fix_lag_distribution.png`: distribution of time between attributed bug-introducing and bug-fixing commits.
 - `plots/szz_complexity_changes.png`: SZZ complexity-change summary, generated only when SZZ attributions exist.
 
 ## Methodology notes

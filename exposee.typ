@@ -34,5 +34,5 @@
 #counter(page).update(1)
 
 #numbered_section([
-  #bibliography("references.bib", title: [References], style: "ieee", full: true)
+  #bibliography("references.bib", title: [References], style: "american-medical-association", full: true)
 ])

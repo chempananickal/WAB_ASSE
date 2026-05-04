@@ -9,6 +9,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from multiprocessing import Manager
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from tqdm import tqdm
@@ -34,7 +35,7 @@ try:
     from helpers.models import PackageRecord
     from helpers.progress import configure_logging, consume_progress_events, log_message
     from helpers.reporting import (
-        build_summary_markdown,
+        build_extreme_bugfix_function_table,
         bugfix_event_frame_from_raw_json,
         load_raw_results_json,
         package_records_to_frame,
@@ -74,7 +75,7 @@ except ImportError:
     from Code.helpers.models import PackageRecord
     from Code.helpers.progress import configure_logging, consume_progress_events, log_message
     from Code.helpers.reporting import (
-        build_summary_markdown,
+        build_extreme_bugfix_function_table,
         bugfix_event_frame_from_raw_json,
         load_raw_results_json,
         package_records_to_frame,
@@ -107,12 +108,12 @@ def result_paths(output_dir: Path) -> dict[str, Path]:
         "complexity_bucket_summary": output_dir / "complexity_bucket_summary.csv",
         "hotspot_concentration_summary": output_dir / "hotspot_concentration_summary.csv",
         "repeat_bugfix_distribution_summary": output_dir / "repeat_bugfix_distribution_summary.csv",
+        "extreme_bugfix_function_table": output_dir / "extreme_bugfix_function_table.csv",
         "package_normalized_bugfix_density_summary": output_dir / "package_normalized_bugfix_density_summary.csv",
         "bugfix_complexity_change_summary": output_dir / "bugfix_complexity_change_summary.csv",
         "bugfix_commit_timeline_summary": output_dir / "bugfix_commit_timeline_summary.csv",
         "szz_fix_lag_summary": output_dir / "szz_fix_lag_summary.csv",
         "szz_summary": output_dir / "szz_summary.csv",
-        "analysis_summary": output_dir / "analysis_summary.md",
         "analysis_run_details": output_dir / "analysis_run_details.txt",
         "raw_results": output_dir / "raw_function_histories.json",
         "top_packages_plot": output_dir / "plots" / "top_packages.png",
@@ -166,12 +167,19 @@ def build_analysis_run_details(
     query_started_at_local: datetime,
     since_date_utc: datetime,
     packages_df: pd.DataFrame,
+    package_summary: pd.DataFrame,
+    analyzed_function_count: int,
     repo_snapshots: list[dict[str, str]],
 ) -> str:
     """Build a small text summary describing the run context and inputs."""
 
     query_started_at_utc = query_started_at_local.astimezone(timezone.utc)
     timezone_name = query_started_at_local.tzname() or "unknown"
+    functions_by_package: dict[str, Any] = {}
+    if not package_summary.empty and {"package", "functions_analyzed"}.issubset(package_summary.columns):
+        functions_by_package = (
+            package_summary.set_index("package")["functions_analyzed"].to_dict()
+        )
     lines = [
         "Analysis run details",
         "",
@@ -180,11 +188,12 @@ def build_analysis_run_details(
         f"Query timestamp (UTC): {query_started_at_utc.isoformat()}",
         f"Analysis window start (UTC): {since_date_utc.isoformat()}",
         "",
-        "Paper-relevant configuration",
+        "Configuration summary",
         f"- Config file: {config.config_path}",
         f"- Requested top N packages: {config.top_n}",
         f"- Candidate pool size: {config.candidate_pool}",
         f"- Analysis window (years): {config.years}",
+        f"- Functions analyzed: {analyzed_function_count}",
         f"- Include tests: {config.include_tests}",
         f"- Python only: {config.python_only}",
         f"- Max recent source commits per repo: {format_optional_limit(config.max_commits_per_repo)}",
@@ -204,8 +213,14 @@ def build_analysis_run_details(
         lines.append("- none")
     else:
         for record in packages_df.itertuples(index=False):
+            functions_analyzed = functions_by_package.get(record.name)
+            functions_part = (
+                f" | functions_analyzed={int(functions_analyzed)}"
+                if functions_analyzed is not None and not pd.isna(functions_analyzed)
+                else ""
+            )
             lines.append(
-                f"- #{record.rank} {record.name} {record.version} | direct={record.direct_dependents} | total={record.total_dependents}"
+                f"- #{record.rank} {record.name} {record.version} | direct={record.direct_dependents} | total={record.total_dependents}{functions_part}"
             )
 
     lines.extend(["", "Prepared repository HEAD commits:"])
@@ -229,6 +244,8 @@ def write_analysis_run_details(
     query_started_at_local: datetime,
     since_date_utc: datetime,
     packages_df: pd.DataFrame,
+    package_summary: pd.DataFrame,
+    analyzed_function_count: int,
     repo_snapshots: list[dict[str, str]],
 ) -> None:
     """Write the plain-text run details file alongside the other outputs."""
@@ -240,6 +257,8 @@ def write_analysis_run_details(
             query_started_at_local=query_started_at_local,
             since_date_utc=since_date_utc,
             packages_df=packages_df,
+            package_summary=package_summary,
+            analyzed_function_count=analyzed_function_count,
             repo_snapshots=repo_snapshots,
         ),
         encoding="utf-8",
@@ -305,6 +324,10 @@ def render_plots_and_summaries(
             function_df,
             paths["repeat_bugfix_distribution_plot"],
         )
+        extreme_bugfix_function_table = build_extreme_bugfix_function_table(
+            function_df,
+            bugfix_event_df,
+        )
     else:
         bucket_summary = pd.DataFrame(
             columns=[
@@ -319,7 +342,21 @@ def render_plots_and_summaries(
             columns=["function_rank", "function_share", "cumulative_bugfix_share"]
         )
         repeat_bugfix_distribution_summary = pd.DataFrame(
-            columns=["bugfix_commits", "functions_at_or_above", "share"]
+            columns=["bugfix_commits", "functions_with_exact_count", "share"]
+        )
+        extreme_bugfix_function_table = pd.DataFrame(
+            columns=[
+                "package",
+                "package_rank",
+                "file_path",
+                "function",
+                "kind",
+                "complexity",
+                "n_bugfix_commits",
+                "bugfix_commit",
+                "bugfix_commit_date",
+                "bugfix_message",
+            ]
         )
     if not bugfix_event_df.empty:
         plot_bugfix_complexity_before_after(bugfix_event_df, paths["bugfix_before_after_plot"])
@@ -360,6 +397,7 @@ def render_plots_and_summaries(
     write_dataframe(bucket_summary, paths["complexity_bucket_summary"])
     write_dataframe(hotspot_concentration_summary, paths["hotspot_concentration_summary"])
     write_dataframe(repeat_bugfix_distribution_summary, paths["repeat_bugfix_distribution_summary"])
+    write_dataframe(extreme_bugfix_function_table, paths["extreme_bugfix_function_table"])
     write_dataframe(package_normalized_bugfix_density_summary, paths["package_normalized_bugfix_density_summary"])
     write_dataframe(bugfix_change_summary, paths["bugfix_complexity_change_summary"])
     write_dataframe(bugfix_timeline_summary, paths["bugfix_commit_timeline_summary"])
@@ -373,16 +411,9 @@ def render_plots_and_summaries(
         szz_df=szz_df,
         target=paths["raw_results"],
     )
-    paths["analysis_summary"].write_text(
-        build_summary_markdown(
-            packages_df=packages_df,
-            function_df=function_df,
-            package_summary=package_summary,
-            bucket_summary=bucket_summary,
-            szz_summary=szz_summary,
-        ),
-        encoding="utf-8",
-    )
+    stale_summary = output_dir / "analysis_summary.md"
+    if stale_summary.exists():
+        stale_summary.unlink()
     return bucket_summary, bugfix_change_summary, bugfix_timeline_summary, szz_summary
 
 
@@ -464,6 +495,8 @@ def main() -> None:
             query_started_at_local=query_started_at_local,
             since_date_utc=since_date,
             packages_df=packages_df,
+            package_summary=package_summary,
+            analyzed_function_count=len(function_df),
             repo_snapshots=[],
         )
         phase_bar.update(1)
@@ -538,6 +571,8 @@ def main() -> None:
             query_started_at_local=query_started_at_local,
             since_date_utc=since_date,
             packages_df=packages_df,
+            package_summary=package_summary,
+            analyzed_function_count=len(function_df),
             repo_snapshots=[],
         )
         phase_bar.set_description_str("phase [done]")
@@ -746,6 +781,8 @@ def main() -> None:
         query_started_at_local=query_started_at_local,
         since_date_utc=since_date,
         packages_df=packages_df,
+        package_summary=package_summary,
+        analyzed_function_count=len(function_df),
         repo_snapshots=repo_snapshots,
     )
     phase_bar.update(1)

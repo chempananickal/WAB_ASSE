@@ -1,0 +1,31 @@
+package,metric,value
+numpy,Bug-fixed functions / analyzed functions,0.11102474413784169
+pandas,Bug-fixed functions / analyzed functions,0.21237830319888734
+pydantic,Bug-fixed functions / analyzed functions,0.08428314337132574
+pyyaml,Bug-fixed functions / analyzed functions,0.002717391304347826
+matplotlib,Bug-fixed functions / analyzed functions,0.0617788679930953
+scipy,Bug-fixed functions / analyzed functions,0.16004566210045662
+click,Bug-fixed functions / analyzed functions,0.09664694280078895
+tqdm,Bug-fixed functions / analyzed functions,0.03167420814479638
+rich,Bug-fixed functions / analyzed functions,0.05067567567567568
+python-dotenv,Bug-fixed functions / analyzed functions,0.09230769230769231
+numpy,Bug-fix commits / analyzed functions,0.08381914755797383
+pandas,Bug-fix commits / analyzed functions,0.14687065368567453
+pydantic,Bug-fix commits / analyzed functions,0.0644871025794841
+pyyaml,Bug-fix commits / analyzed functions,0.002717391304347826
+matplotlib,Bug-fix commits / analyzed functions,0.05033160715908058
+scipy,Bug-fix commits / analyzed functions,0.07252663622526637
+click,Bug-fix commits / analyzed functions,0.09270216962524655
+tqdm,Bug-fix commits / analyzed functions,0.04072398190045249
+rich,Bug-fix commits / analyzed functions,0.06306306306306306
+python-dotenv,Bug-fix commits / analyzed functions,0.15384615384615385
+numpy,Unique bug-introducing commits / analyzed functions,0.11789091851276072
+pandas,Unique bug-introducing commits / analyzed functions,0.16870653685674547
+pydantic,Unique bug-introducing commits / analyzed functions,0.09538092381523695
+pyyaml,Unique bug-introducing commits / analyzed functions,0.0
+matplotlib,Unique bug-introducing commits / analyzed functions,0.06804760606886527
+scipy,Unique bug-introducing commits / analyzed functions,0.14908675799086757
+click,Unique bug-introducing commits / analyzed functions,0.10453648915187377
+tqdm,Unique bug-introducing commits / analyzed functions,0.049773755656108594
+rich,Unique bug-introducing commits / analyzed functions,0.06981981981981981
+python-dotenv,Unique bug-introducing commits / analyzed functions,0.1076923076923077
