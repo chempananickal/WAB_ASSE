@@ -56,7 +56,7 @@ LOG_LEVELS = {
     "INFO": logging.INFO,
     "DEBUG": logging.DEBUG,
 }
-MINING_CACHE_VERSION = 9
+MINING_CACHE_VERSION = 10
 SUBPROCESS_TEXT_KWARGS: dict[str, Any] = {
     "text": True,
     "encoding": "utf-8",
@@ -64,6 +64,11 @@ SUBPROCESS_TEXT_KWARGS: dict[str, Any] = {
     "stdin": subprocess.DEVNULL,
 }
 PYTHON_SOURCE_EXTENSIONS = {".py"}
+SOURCE_EXTENSION_ALIASES = {
+    ".pyx": ".py",
+    ".pxd": ".py",
+    ".pxi": ".py",
+}
 FUNCTION_METRIC_COLUMNS = [
     "package",
     "package_rank",
@@ -133,8 +138,21 @@ def lizard_source_extensions() -> set[str]:
     return extensions
 
 
+ALIASED_SOURCE_EXTENSIONS = set(SOURCE_EXTENSION_ALIASES)
 LIZARD_SOURCE_EXTENSIONS = lizard_source_extensions()
-SUPPORTED_SOURCE_EXTENSIONS = tuple(sorted(PYTHON_SOURCE_EXTENSIONS | LIZARD_SOURCE_EXTENSIONS))
+SUPPORTED_SOURCE_EXTENSIONS = tuple(
+    sorted(PYTHON_SOURCE_EXTENSIONS | ALIASED_SOURCE_EXTENSIONS | LIZARD_SOURCE_EXTENSIONS)
+)
+
+
+def alias_source_path_for_parser(file_path: str) -> str:
+    """Return a parser-friendly file path for languages that need extension aliasing."""
+
+    suffix = Path(file_path).suffix.lower()
+    aliased_suffix = SOURCE_EXTENSION_ALIASES.get(suffix)
+    if not aliased_suffix:
+        return file_path
+    return Path(file_path).with_suffix(aliased_suffix).as_posix()
 
 
 def selected_source_extensions(python_only: bool) -> tuple[str, ...]:

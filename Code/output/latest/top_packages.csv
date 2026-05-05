@@ -1,11 +1,11 @@
 rank,name,version,direct_dependents,total_dependents,source_repo,source_repo_url,provenance,summary
-1,numpy,2.4.4,85271,142967,github.com/numpy/numpy,https://github.com/numpy/numpy.git,UNVERIFIED_METADATA,Fundamental package for array computing in Python
-2,pandas,3.0.2,49948,67877,github.com/pandas-dev/pandas,https://github.com/pandas-dev/pandas.git,PYPI_PUBLISH_ATTESTATION,"Powerful data structures for data analysis, time series, and statistics"
-3,pydantic,2.13.3,40964,89080,github.com/pydantic/pydantic,https://github.com/pydantic/pydantic.git,PYPI_PUBLISH_ATTESTATION,Data validation using Python type hints
-4,pyyaml,6.0.3,36933,105265,github.com/yaml/pyyaml,https://github.com/yaml/pyyaml.git,UNVERIFIED_METADATA,YAML parser and emitter for Python
-5,matplotlib,3.10.9,36840,49245,github.com/matplotlib/matplotlib,https://github.com/matplotlib/matplotlib.git,UNVERIFIED_METADATA,Python plotting package
-6,scipy,1.17.1,35026,65545,github.com/scipy/scipy,https://github.com/scipy/scipy.git,UNVERIFIED_METADATA,Fundamental algorithms for scientific computing in Python
-7,click,8.3.3,31406,118190,github.com/pallets/click,https://github.com/pallets/click.git,PYPI_PUBLISH_ATTESTATION,Composable command line interface toolkit
-8,tqdm,4.67.3,26548,71076,github.com/tqdm/tqdm,https://github.com/tqdm/tqdm.git,PYPI_PUBLISH_ATTESTATION,"Fast, Extensible Progress Meter"
-9,rich,15.0.0,20231,66195,github.com/textualize/rich,https://github.com/textualize/rich.git,UNVERIFIED_METADATA,"Render rich text, tables, progress bars, syntax highlighting, markdown and more to the terminal"
-10,python-dotenv,1.2.2,18977,54478,github.com/theskumar/python-dotenv,https://github.com/theskumar/python-dotenv.git,PYPI_PUBLISH_ATTESTATION,Read key-value pairs from a .env file and set them as environment variables
+1,numpy,2.4.4,85375,143111,github.com/numpy/numpy,https://github.com/numpy/numpy.git,UNVERIFIED_METADATA,Fundamental package for array computing in Python
+2,pandas,3.0.2,49975,67920,github.com/pandas-dev/pandas,https://github.com/pandas-dev/pandas.git,PYPI_PUBLISH_ATTESTATION,"Powerful data structures for data analysis, time series, and statistics"
+3,pydantic,2.13.3,41096,89309,github.com/pydantic/pydantic,https://github.com/pydantic/pydantic.git,PYPI_PUBLISH_ATTESTATION,Data validation using Python type hints
+4,pyyaml,6.0.3,37018,105415,github.com/yaml/pyyaml,https://github.com/yaml/pyyaml.git,UNVERIFIED_METADATA,YAML parser and emitter for Python
+5,matplotlib,3.10.9,36862,49277,github.com/matplotlib/matplotlib,https://github.com/matplotlib/matplotlib.git,UNVERIFIED_METADATA,Python plotting package
+6,scipy,1.17.1,35054,65607,github.com/scipy/scipy,https://github.com/scipy/scipy.git,UNVERIFIED_METADATA,Fundamental algorithms for scientific computing in Python
+7,click,8.3.3,31448,118421,github.com/pallets/click,https://github.com/pallets/click.git,PYPI_PUBLISH_ATTESTATION,Composable command line interface toolkit
+8,tqdm,4.67.3,26567,71146,github.com/tqdm/tqdm,https://github.com/tqdm/tqdm.git,PYPI_PUBLISH_ATTESTATION,"Fast, Extensible Progress Meter"
+9,rich,15.0.0,20326,66362,github.com/textualize/rich,https://github.com/textualize/rich.git,UNVERIFIED_METADATA,"Render rich text, tables, progress bars, syntax highlighting, markdown and more to the terminal"
+10,python-dotenv,1.2.2,19007,54627,github.com/theskumar/python-dotenv,https://github.com/theskumar/python-dotenv.git,PYPI_PUBLISH_ATTESTATION,Read key-value pairs from a .env file and set them as environment variables

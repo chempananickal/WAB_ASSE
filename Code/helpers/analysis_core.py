@@ -26,8 +26,10 @@ from .common import (
     MINING_CACHE_VERSION,
     PACKAGE_SUMMARY_COLUMNS,
     PYTHON_SOURCE_EXTENSIONS,
+    SOURCE_EXTENSION_ALIASES,
     SUBPROCESS_TEXT_KWARGS,
     SZZ_COLUMNS,
+    alias_source_path_for_parser,
     empty_bugfix_event_frame,
     empty_function_metrics_frame,
     empty_package_summary_frame,
@@ -149,7 +151,10 @@ def parse_lizard_functions(source: str, file_path: str) -> list[ParsedFunction]:
     """
 
     try:
-        analysis = lizard.analyze_file.analyze_source_code(file_path, source)
+        analysis = lizard.analyze_file.analyze_source_code(
+            alias_source_path_for_parser(file_path),
+            source,
+        )
     except Exception:
         return []
 
@@ -189,7 +194,7 @@ def parse_source_functions(source: str, file_path: str) -> list[ParsedFunction]:
     extension = Path(file_path).suffix.lower()
     if extension in PYTHON_SOURCE_EXTENSIONS:
         return parse_python_functions(source, file_path)
-    if extension in LIZARD_SOURCE_EXTENSIONS:
+    if extension in LIZARD_SOURCE_EXTENSIONS or extension in SOURCE_EXTENSION_ALIASES:
         return parse_lizard_functions(source, file_path)
     return []
 
@@ -727,7 +732,7 @@ def describe_function_complexity_change(
     if before_function is not None and after_function is None:
         return None, "Deleted or renamed", before_function.complexity, None, before_function.kind
     if before_function is None and after_function is None:
-        return None, "Match unavailable", None, None, None
+        return None, "Function pair not recoverable", None, None, None
 
     complexity_delta = after_function.complexity - before_function.complexity
     return (
@@ -1107,7 +1112,6 @@ def mine_repository_metrics(
     all_touches: Counter[tuple[str, str]] = Counter()
     bugfix_deletions: list[BugfixDeletionRecord] = []
     bugfix_event_rows: list[dict[str, Any]] = []
-    bugfix_commit_count = 0
     commit_message_cache: dict[str, str] = {}
     commit_date_cache: dict[str, str] = {}
     rename_cache: dict[tuple[str, str], dict[str, tuple[str, str]]] = {}
@@ -1138,8 +1142,6 @@ def mine_repository_metrics(
         commit_date_cache[commit_hash] = commit_date_value
         is_bugfix = bool(BUGFIX_PATTERN.search(message))
         parent_commit = parse_commit_parent(repo_path, commit_hash)
-        if is_bugfix:
-            bugfix_commit_count += 1
 
         file_diffs = git_commit_file_diffs(
             repo_path,
@@ -1265,6 +1267,10 @@ def mine_repository_metrics(
         spearman_result = spearmanr(function_df["complexity"], function_df["n_bugfix_commits"])
         spearman_value = float(spearman_result.statistic)
         spearman_pvalue = float(spearman_result.pvalue)
+
+    bugfix_commit_count = int(
+        len({row["bugfix_commit"] for row in bugfix_event_rows if row.get("bugfix_commit")})
+    )
 
     package_summary = pd.DataFrame(
         [

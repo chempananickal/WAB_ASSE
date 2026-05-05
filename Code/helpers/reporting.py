@@ -19,7 +19,7 @@ SZZ_CATEGORY_ORDER = [
     "Decrease",
     "New function",
     "Deleted or renamed",
-    "Match unavailable",
+    "Function pair not recoverable",
     "No parent commit",
 ]
 BUGFIX_CATEGORY_ORDER = [
@@ -28,7 +28,7 @@ BUGFIX_CATEGORY_ORDER = [
     "Decrease",
     "New function",
     "Deleted or renamed",
-    "Match unavailable",
+    "Function pair not recoverable",
 ]
 CSV_MESSAGE_KEEP_PATTERN = re.compile(
     r"\b(fix(?:e[sd])?|bug(?:fix(?:es)?)?|regression|hotfix|patch(?:ed)?|close[sd]?|closing)\b",
@@ -585,7 +585,7 @@ def plot_bugfix_complexity_changes(bugfix_event_df: pd.DataFrame, target: Path) 
         )
 
     plot_df = bugfix_event_df.copy()
-    plot_df["category"] = plot_df["bugfix_complexity_category"].fillna("Match unavailable")
+    plot_df["category"] = plot_df["bugfix_complexity_category"].fillna("Function pair not recoverable")
     present_categories = [
         category for category in BUGFIX_CATEGORY_ORDER if category in set(plot_df["category"])
     ]
@@ -823,7 +823,7 @@ def plot_szz_summary(szz_df: pd.DataFrame, target: Path) -> pd.DataFrame:
 
     plot_df = szz_df.copy()
     if "complexity_category" in plot_df.columns:
-        plot_df["category"] = plot_df["complexity_category"].fillna("Match unavailable")
+        plot_df["category"] = plot_df["complexity_category"].fillna("Function pair not recoverable")
     else:
         plot_df["category"] = plot_df["complexity_delta"].apply(
             lambda value: "Increase"
@@ -834,7 +834,7 @@ def plot_szz_summary(szz_df: pd.DataFrame, target: Path) -> pd.DataFrame:
                 else (
                     "No change"
                     if value is not None and not pd.isna(value)
-                    else "Match unavailable"
+                    else "Function pair not recoverable"
                 )
             )
         )

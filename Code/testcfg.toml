@@ -6,7 +6,7 @@
 top_n = 10
 
 # Number of packages fetched before reranking. Must be at least top_n.
-candidate_pool = 250
+candidate_pool = 1000
 
 # If true, stop after writing the discovered package list and skip mining.
 # Options: true, false.
@@ -28,7 +28,7 @@ repos_dir = "repos"
 [mining]
 
 # Lookback window, in years, used to choose recent commits for analysis.
-years = 2.0
+years = 5.0
 
 # Set this to 0 to disable SZZ entirely. Omit the key to leave it uncapped.
 # Purpose: limit how many bug-fix commits per repository enter the SZZ phase.
@@ -68,7 +68,7 @@ refresh_mining_cache = false
 # Choose auto, month, quarter, or year for the bug-fix timeline plot.
 # "auto" keeps the previous behavior: months for windows up to 2 years, otherwise years.
 # Options: "auto", "month", "quarter", "year".
-bugfix_timeline_granularity = "auto"
+bugfix_timeline_granularity = "quarter"
 
 # Rename-matching thresholds shared by bug-fix before/after analysis and SZZ.
 [matching.rename]
