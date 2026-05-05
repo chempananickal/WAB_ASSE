@@ -119,6 +119,10 @@ __pycache__/
 # hypothesis
 .hypothesis/
 
+# local secrets
+.env
+Code/.env
+
 # some tinymist stuff
 tinymist.lock
 

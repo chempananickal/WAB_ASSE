@@ -133,4 +133,9 @@
     prompt: [Exclude documentation files from the complexity and SZZ analysis.],
     usage: [Excluded documentation files from analysis inputs.],
   ),
+  (
+    system: [GitHub Copilot 27],
+    prompt: [Replace the old package-selection source with Libraries.io and update the supporting documentation accordingly.],
+    usage: [Switched package discovery to Libraries.io and updated the related documentation.],
+  ),
 )

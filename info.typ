@@ -1,5 +1,5 @@
 #let common_info = (
-  thesis_title: "Analyzing the Correlation Between Cyclomatic Complexity and Code Quality in Python Projects",
+  thesis_title: "Analyzing the Correlation Between Cyclomatic Complexity and Code Quality in Highly Instrumental Python Projects",
   thesis_subtitle: "Using the SZZ Algorithm on the Most Depended-upon Python Packages",
   author_name: "Rubin Chempananickal James",
   author_email: "rubin.chempananickal-james@stud-provadis-hochschule.de",

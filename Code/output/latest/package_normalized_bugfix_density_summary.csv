@@ -1,31 +1,31 @@
 package,metric,value
+requests,Bug-fixed functions / analyzed functions,0.05263157894736842
+pytest,Bug-fixed functions / analyzed functions,0.4201424211597152
 pydantic,Bug-fixed functions / analyzed functions,0.19766046790641872
-pyyaml,Bug-fixed functions / analyzed functions,0.01020408163265306
-scipy,Bug-fixed functions / analyzed functions,0.2536205248842167
+pytest-cov,Bug-fixed functions / analyzed functions,0.6538461538461539
 click,Bug-fixed functions / analyzed functions,0.14792899408284024
-tqdm,Bug-fixed functions / analyzed functions,0.12669683257918551
-rich,Bug-fixed functions / analyzed functions,0.23085585585585586
-python-dotenv,Bug-fixed functions / analyzed functions,0.2
 numpy,Bug-fixed functions / analyzed functions,0.19601117886178862
+black,Bug-fixed functions / analyzed functions,0.5789473684210527
 matplotlib,Bug-fixed functions / analyzed functions,0.15835377487053692
+scipy,Bug-fixed functions / analyzed functions,0.2536205248842167
 pandas,Bug-fixed functions / analyzed functions,0.5262096774193549
+requests,Bug-fix commits / analyzed functions,0.09716599190283401
+pytest,Bug-fix commits / analyzed functions,0.2131230925737538
 pydantic,Bug-fix commits / analyzed functions,0.22075584883023394
-pyyaml,Bug-fix commits / analyzed functions,0.007653061224489796
-scipy,Bug-fix commits / analyzed functions,0.119458942880247
+pytest-cov,Bug-fix commits / analyzed functions,0.3269230769230769
 click,Bug-fix commits / analyzed functions,0.1222879684418146
-tqdm,Bug-fix commits / analyzed functions,0.13574660633484162
-rich,Bug-fix commits / analyzed functions,0.23423423423423423
-python-dotenv,Bug-fix commits / analyzed functions,0.2923076923076923
-numpy,Bug-fix commits / analyzed functions,0.17060467479674796
+numpy,Bug-fix commits / analyzed functions,0.17047764227642276
+black,Bug-fix commits / analyzed functions,0.3492822966507177
 matplotlib,Bug-fix commits / analyzed functions,0.12919051512673754
-pandas,Bug-fix commits / analyzed functions,0.3995715725806452
+scipy,Bug-fix commits / analyzed functions,0.1193854296846284
+pandas,Bug-fix commits / analyzed functions,0.3993195564516129
+requests,Unique bug-introducing commits / analyzed functions,0.1214574898785425
+pytest,Unique bug-introducing commits / analyzed functions,0.4069175991861648
 pydantic,Unique bug-introducing commits / analyzed functions,0.38392321535692864
-pyyaml,Unique bug-introducing commits / analyzed functions,0.015306122448979591
-scipy,Unique bug-introducing commits / analyzed functions,0.25700213188267296
+pytest-cov,Unique bug-introducing commits / analyzed functions,1.9423076923076923
 click,Unique bug-introducing commits / analyzed functions,0.14990138067061143
-tqdm,Unique bug-introducing commits / analyzed functions,0.40271493212669685
-rich,Unique bug-introducing commits / analyzed functions,0.32094594594594594
-python-dotenv,Unique bug-introducing commits / analyzed functions,0.4153846153846154
-numpy,Unique bug-introducing commits / analyzed functions,0.2651168699186992
+numpy,Unique bug-introducing commits / analyzed functions,0.2648628048780488
+black,Unique bug-introducing commits / analyzed functions,0.3875598086124402
 matplotlib,Unique bug-introducing commits / analyzed functions,0.19678386481330062
-pandas,Unique bug-introducing commits / analyzed functions,0.6510836693548387
+scipy,Unique bug-introducing commits / analyzed functions,0.2569286186870543
+pandas,Unique bug-introducing commits / analyzed functions,0.6509576612903226

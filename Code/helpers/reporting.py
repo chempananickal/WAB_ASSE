@@ -240,23 +240,6 @@ def assign_complexity_buckets(function_df: pd.DataFrame) -> tuple[pd.DataFrame, 
     return bucket_df, bucket_labels
 
 
-def plot_top_packages(packages_df: pd.DataFrame, target: Path) -> None:
-    """Plot direct dependent counts for the selected packages."""
-
-    ensure_directory(target.parent)
-    plt, sns = load_plotting_modules()
-    sns.set_theme(style="whitegrid")
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ordered = packages_df.sort_values("direct_dependents", ascending=True)
-    ax.barh(ordered["name"], ordered["direct_dependents"], color="#2a6f97")
-    ax.set_xlabel("Direct dependents")
-    ax.set_ylabel("Package")
-    ax.set_title("Most depended-upon packages in the candidate pool")
-    fig.tight_layout()
-    fig.savefig(target, dpi=200)
-    plt.close(fig)
-
-
 def plot_hotspot_concentration(function_df: pd.DataFrame, target: Path) -> pd.DataFrame:
     """Plot how much bug-fix activity is concentrated in the most complex functions."""
 
@@ -948,7 +931,7 @@ def build_summary_markdown(
             "",
             "## Notes",
             "Bug-fix commits are identified with a commit-message heuristic.",
-            "The reverse dependency ranking uses PyPI metadata plus deps.dev because PyPI does not expose a first-party reverse dependency leaderboard.",
+            "Package selection follows the Libraries.io PyPI dependent-count leaderboard, filtered to packages with resolvable GitHub source repositories.",
             "The SZZ pass is line-based and intentionally conservative: unresolved file history and renamed functions are left as missing values.",
         ]
     )

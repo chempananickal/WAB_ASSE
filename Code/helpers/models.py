@@ -39,15 +39,11 @@ class PackageRecord:
     Parameters
     ----------
     rank:
-        Rank after sorting by direct dependent count.
+        Rank in the selected package set.
     name:
         Normalized PyPI project name.
     version:
-        Default release version resolved through deps.dev.
-    direct_dependents:
-        Number of direct dependents reported by deps.dev.
-    total_dependents:
-        Number of transitive dependents reported by deps.dev.
+        Selected release version.
     source_repo:
         Canonical source repository identifier when resolvable.
     source_repo_url:
@@ -61,8 +57,6 @@ class PackageRecord:
     rank: int
     name: str
     version: str
-    direct_dependents: int
-    total_dependents: int
     source_repo: str
     source_repo_url: str
     provenance: str

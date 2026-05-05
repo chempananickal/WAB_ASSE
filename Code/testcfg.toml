@@ -1,12 +1,11 @@
 # Reverse-dependency discovery settings.
 [discovery]
 
-# Number of packages kept after reranking the candidate pool by reverse
-# dependency counts.
+# Number of packages selected for analysis.
 top_n = 10
 
-# Number of packages fetched before reranking. Must be at least top_n.
-candidate_pool = 1000
+# Safety cap on how far down the Libraries.io ranking the pipeline will scan while filling the top_n package slots. Must be >= top_n.
+candidate_pool = 20
 
 # If true, stop after writing the discovered package list and skip mining.
 # Options: true, false.

@@ -50,7 +50,6 @@ try:
         szz_frame_from_raw_json,
         plot_szz_fix_lag_distribution,
         plot_szz_summary,
-        plot_top_packages,
         write_raw_results_json,
         write_dataframe,
     )
@@ -90,7 +89,6 @@ except ImportError:
         szz_frame_from_raw_json,
         plot_szz_fix_lag_distribution,
         plot_szz_summary,
-        plot_top_packages,
         write_raw_results_json,
         write_dataframe,
     )
@@ -116,7 +114,6 @@ def result_paths(output_dir: Path) -> dict[str, Path]:
         "szz_summary": output_dir / "szz_summary.csv",
         "analysis_run_details": output_dir / "analysis_run_details.txt",
         "raw_results": output_dir / "raw_function_histories.json",
-        "top_packages_plot": output_dir / "plots" / "top_packages.png",
         "complexity_bucket_plot": output_dir / "plots" / "complexity_bucket_bugfix_share.png",
         "hotspot_concentration_plot": output_dir / "plots" / "hotspot_concentration.png",
         "repeat_bugfix_distribution_plot": output_dir / "plots" / "repeat_bugfix_distribution.png",
@@ -191,7 +188,7 @@ def build_analysis_run_details(
         "Configuration summary",
         f"- Config file: {config.config_path}",
         f"- Requested top N packages: {config.top_n}",
-        f"- Candidate pool size: {config.candidate_pool}",
+        f"- Maximum ranked packages inspected: {config.candidate_pool}",
         f"- Analysis window (years): {config.years}",
         f"- Functions analyzed: {analyzed_function_count}",
         f"- Include tests: {config.include_tests}",
@@ -220,7 +217,7 @@ def build_analysis_run_details(
                 else ""
             )
             lines.append(
-                f"- #{record.rank} {record.name} {record.version} | direct={record.direct_dependents} | total={record.total_dependents}{functions_part}"
+                f"- #{record.rank} {record.name} {record.version}{functions_part}"
             )
 
     lines.extend(["", "Prepared repository HEAD commits:"])
@@ -312,8 +309,6 @@ def render_plots_and_summaries(
 
     paths = result_paths(output_dir)
     log_message("Generating plots and summaries.")
-    if not packages_df.empty:
-        plot_top_packages(packages_df, paths["top_packages_plot"])
     if not function_df.empty:
         bucket_summary = plot_complexity_buckets(function_df, paths["complexity_bucket_plot"])
         hotspot_concentration_summary = plot_hotspot_concentration(
@@ -414,6 +409,9 @@ def render_plots_and_summaries(
     stale_summary = output_dir / "analysis_summary.md"
     if stale_summary.exists():
         stale_summary.unlink()
+    stale_top_packages_plot = output_dir / "plots" / "top_packages.png"
+    if stale_top_packages_plot.exists():
+        stale_top_packages_plot.unlink()
     return bucket_summary, bugfix_change_summary, bugfix_timeline_summary, szz_summary
 
 
@@ -551,15 +549,20 @@ def main() -> None:
     )
     phase_bar.update(1)
 
+    function_df = pd.DataFrame(columns=FUNCTION_METRIC_COLUMNS)
+    package_summary = pd.DataFrame(columns=PACKAGE_SUMMARY_COLUMNS)
+    bugfix_event_df = pd.DataFrame(columns=BUGFIX_EVENT_COLUMNS)
+    szz_df = pd.DataFrame(columns=SZZ_COLUMNS)
+
     if args.discovery_only:
         if args.mode == "both":
             phase_bar.set_description_str("phase [plots+summaries]")
             render_plots_and_summaries(
                 packages_df,
-                pd.DataFrame(columns=FUNCTION_METRIC_COLUMNS),
-                pd.DataFrame(columns=PACKAGE_SUMMARY_COLUMNS),
-                pd.DataFrame(columns=BUGFIX_EVENT_COLUMNS),
-                pd.DataFrame(columns=SZZ_COLUMNS),
+                function_df,
+                package_summary,
+                bugfix_event_df,
+                szz_df,
                 output_dir,
                 analysis_years=args.years,
                 timeline_granularity=args.bugfix_timeline_granularity,

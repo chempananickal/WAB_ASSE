@@ -1,16 +1,16 @@
 Analysis run details
 
-Query timestamp (local): 2026-05-05T07:04:30.219984+02:00
+Query timestamp (local): 2026-05-05T15:38:20.986292+02:00
 Query timezone: W. Europe Daylight Time
-Query timestamp (UTC): 2026-05-05T05:04:30.219984+00:00
-Analysis window start (UTC): 2021-05-05T05:04:30.219984+00:00
+Query timestamp (UTC): 2026-05-05T13:38:20.986292+00:00
+Analysis window start (UTC): 2021-05-05T13:38:20.986292+00:00
 
 Configuration summary
 - Config file: C:\Users\rubin\wabs\WAB_ASSE\Code\testcfg.toml
 - Requested top N packages: 10
-- Candidate pool size: 1000
+- Maximum ranked packages inspected: 20
 - Analysis window (years): 5.0
-- Functions analyzed: 45825
+- Functions analyzed: 47151
 - Include tests: False
 - Python only: False
 - Max recent source commits per repo: unbounded
@@ -19,25 +19,25 @@ Configuration summary
 - Rename matching thresholds: min_overlap_ratio=0.6, max_boundary_distance_with_overlap=6, min_score=0.99, max_boundary_distance_for_score=3
 
 Selected packages (10):
-- #1 numpy 2.4.4 | direct=85375 | total=143111 | functions_analyzed=7872
-- #2 pandas 3.0.2 | direct=49975 | total=67920 | functions_analyzed=7936
-- #3 pydantic 2.13.3 | direct=41096 | total=89309 | functions_analyzed=3334
-- #4 pyyaml 6.0.3 | direct=37018 | total=105415 | functions_analyzed=392
-- #5 matplotlib 3.10.9 | direct=36862 | total=49277 | functions_analyzed=11007
-- #6 scipy 1.17.1 | direct=35054 | total=65607 | functions_analyzed=13603
-- #7 click 8.3.3 | direct=31448 | total=118421 | functions_analyzed=507
-- #8 tqdm 4.67.3 | direct=26567 | total=71146 | functions_analyzed=221
-- #9 rich 15.0.0 | direct=20326 | total=66362 | functions_analyzed=888
-- #10 python-dotenv 1.2.2 | direct=19007 | total=54627 | functions_analyzed=65
+- #1 requests 2.33.1 | functions_analyzed=247
+- #2 numpy 2.4.4 | functions_analyzed=7872
+- #3 pytest 9.0.3 | functions_analyzed=1966
+- #4 pandas 3.0.2 | functions_analyzed=7936
+- #5 pydantic 2.13.3 | functions_analyzed=3334
+- #6 matplotlib 3.10.9 | functions_analyzed=11007
+- #7 pytest-cov 7.1.0 | functions_analyzed=52
+- #8 click 8.3.3 | functions_analyzed=507
+- #9 scipy 1.17.1 | functions_analyzed=13603
+- #10 black 26.3.1 | functions_analyzed=627
 
 Prepared repository HEAD commits:
-- numpy: 27b26e9e3f95e8af3611891ccd0ff53f3169cde2 | 2026-05-04T08:03:12-06:00 | CI: remove Cirrus CI FreeBSD job (#31380)
-- pandas: 711e8a7aad556181f1a37c2a2b09dd275bbb51cd | 2026-05-04T15:29:41-07:00 | [pre-commit.ci] pre-commit autoupdate (#65464)
-- pydantic: 1078a0516b1854708915c0157df5fab059cc453b | 2026-05-03T16:57:27+02:00 | Preserve `RootModel` core metadata (#13129)
-- pyyaml: d51d8a138f7230834fc6e95635ff09ebd329185f | 2025-09-25T11:13:58-07:00 | Update CI and Build Targets for Python 3.14 and Windows/arm64 (#864)
+- requests: 04d750509b90da728e53aee8d7516426e5a1a293 | 2026-05-04T14:42:06-07:00 | Bump https://github.com/astral-sh/ruff-pre-commit (#7411)
+- numpy: 0f897ea330505f83d085e1a12fa32e15f50b8225 | 2026-05-05T12:26:42+02:00 | Merge pull request #31389 from rgommers/intel-compiler-fixes
+- pytest: 8f81c76744daf72d4f77cfc8423f4bdc60733d78 | 2026-05-03T22:14:18+03:00 | Merge pull request #10546 from ykadowak/refactor_atexit
+- pandas: 566284d0ce87c31a2c32fee6f970f4dc2c65f1d4 | 2026-05-05T15:03:25+02:00 | CI: Update pixi.lock (#65463)
+- pydantic: 14e0f2ba41ea84f3c92f1cec0b065390ce6ccb6f | 2026-05-05T08:25:38Z | Avoid redundant dictionary lookups in `_migration.py` (#13152)
 - matplotlib: f4cc437d1bd72ec72cfc2a0e318c867c6969392f | 2026-05-04T23:26:21-04:00 | DOC: Consolidate shared axis examples (#31605)
-- scipy: d67d776e20afd609cbb3b722e051b19b6e18027b | 2026-05-04T21:57:00+01:00 | DEP: linalg: deprecate using linalg functions with LAPACK-incompatible dtypes (#24682)
+- pytest-cov: 574f0c59cf89efae3681394161baec3fe08f51ff | 2026-04-25T00:33:08+03:00 | Extend :file: role to setup.cfg, pyproject.toml, and tox.ini
 - click: 73e155006526575548d143ef519995f540547e52 | 2026-05-04T21:03:00+01:00 | Fix sentinel typing and its uses in parser (#3396)
-- tqdm: 75bdb6c379bcfc6c592b6342dc791a092b5d6ae0 | 2026-02-03T16:58:32Z | fix py3.7 compat
-- rich: 46cebbb032f920eb096efbaf23cdc6fe9dd541f7 | 2026-04-12T16:40:06+07:00 | fix changelog
-- python-dotenv: bca6644d9aedbe287b792b756b3ae3d650cd0d3a | 2026-04-20T01:09:11+05:30 | fix: strip UTF-8 BOM from .env files (#640)
+- scipy: 815ef31f7e664927071c9eeab0c97f99d12836b2 | 2026-05-05T09:35:42+01:00 | MAINT: sparse.linalg: resave propack test dataset objects as sparray (#25099)
+- black: 9fd9ea2835973981e3f5dc5b8eb76f2ded46aa61 | 2026-04-27T09:35:59-05:00 | Fix blackd error handling: split SourceASTParseError from ASTSafetyError (#5080)
