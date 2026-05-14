@@ -7,7 +7,7 @@
   university_name: "Provadis School of International Management and Technology",
   department_name: "Information Technology",
   module_name: "Agile Softwareentwicklung und Softwaretechnik",
-  reviewer_name: "Philip Ceh",
+  reviewer_name: "Philipp Ceh",
   submission_date: datetime.today(),
 )
 
