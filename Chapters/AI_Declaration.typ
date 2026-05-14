@@ -143,4 +143,14 @@
     prompt: [Look at my code. See if I missed something in the SZZ Attribution section in my paper.],
     usage: [Expanded the SZZ Attribution section to include more details on the matching strategy and the handling of unmatched cases.],
   ),
+  (
+    system: [GitHub Copilot 29],
+    prompt: [Read the rest of my paper and draft me an abstract in English and German.],
+    usage: [Drafted an abstract in English and German based on the paper's content.],
+  ),
+  (
+    system: [GitHub Copilot 30],
+    prompt: [Add a CSV table to the Complexity Bucket section showing the mean bugfix commits per function.],
+    usage: [Added a CSV table to the Complexity Bucket section in 03_Results.typ.],
+  ),
 )

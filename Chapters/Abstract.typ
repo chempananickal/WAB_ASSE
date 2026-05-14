@@ -1,5 +1,4 @@
 #let abstract_content = [
-  #heading([Abstract], numbering: none)
 
   This study investigates whether cyclomatic complexity is associated with bug-proneness in important Python packages and how bug-fixing commits relate to later complexity change. Ten highly depended-upon PyPI packages were selected by reverse dependency rank and mined over a five-year window. The resulting dataset covers 47,151 functions. Cyclomatic complexity was measured with Lizard, bug-fixing commits were identified through a commit-message heuristic, and likely bug-introducing commits were approximated with a simplified SZZ procedure.
 

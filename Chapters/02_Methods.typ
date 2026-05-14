@@ -42,7 +42,7 @@
 
   == Complexity Analysis
 
-  Many of the selected packages are written in multiple programming languages aside from Python (for example, parts of numpy are written in C and Fortran). Therefore, a cross-language cyclomatic complexity analysis tool was required for a comprehensive assessment. Lizard, a Python module which can compute the cyclomatic complexity of source code in over 25 programming languages @lizard, was therefore chosen for this purpose.
+  Many of the selected packages are written in multiple programming languages aside from Python (for example, parts of numpy are written in C and Fortran). Therefore, a cross-language @cyclomatic_complexity analysis tool was required for a comprehensive assessment. Lizard, a Python module which can compute the @cyclomatic_complexity of source code in over 25 programming languages @lizard, was therefore chosen for this purpose.
 
   == SZZ Attribution
 

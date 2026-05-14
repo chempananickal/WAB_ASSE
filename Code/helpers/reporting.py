@@ -253,6 +253,8 @@ def plot_hotspot_concentration(function_df: pd.DataFrame, target: Path) -> pd.Da
     if function_df.empty:
         return pd.DataFrame(columns=["function_rank", "function_share", "cumulative_bugfix_share"])
 
+    from matplotlib.ticker import PercentFormatter
+
     plot_df = function_df.sort_values(
         ["complexity", "n_bugfix_commits", "function"],
         ascending=[False, False, True],
@@ -282,8 +284,37 @@ def plot_hotspot_concentration(function_df: pd.DataFrame, target: Path) -> pd.Da
         [pd.Series([0.0]), summary["cumulative_bugfix_share"].reset_index(drop=True)],
         ignore_index=True,
     )
-    ax.step(step_x, step_y, where="post", color="#264653", linewidth=2)
-    ax.plot([0, 1], [0, 1], linestyle="--", color="#8d99ae", linewidth=1)
+    ax.step(
+        step_x,
+        step_y,
+        where="post",
+        color="#264653",
+        linewidth=2,
+        label="Observed cumulative bug-fix share",
+    )
+    ax.plot(
+        [0, 1],
+        [0, 1],
+        linestyle="--",
+        color="#8d99ae",
+        linewidth=1,
+        label="Even distribution across all functions",
+    )
+
+    for share in [0.10, 0.20, 0.50]:
+        nearest_index = (summary["function_share"] - share).abs().idxmin()
+        row = summary.loc[nearest_index]
+        bugfix_share = float(row["cumulative_bugfix_share"])
+        ax.scatter([share], [bugfix_share], color="#e07a5f", s=28, zorder=3)
+        ax.annotate(
+            f"Top {share:.0%} -> {bugfix_share:.1%}",
+            xy=(share, bugfix_share),
+            xytext=(6, 8 if share < 0.5 else -18),
+            textcoords="offset points",
+            fontsize="small",
+            color="#e07a5f",
+        )
+
     saturation_rows = summary.loc[summary["cumulative_bugfix_share"] >= 1.0]
     if not saturation_rows.empty:
         saturation_share = float(saturation_rows.iloc[0]["function_share"])
@@ -291,16 +322,22 @@ def plot_hotspot_concentration(function_df: pd.DataFrame, target: Path) -> pd.Da
         ax.text(
             min(saturation_share + 0.02, 0.82),
             0.93,
-            f"100% reached by top {saturation_share:.1%}",
+            (
+                f"After the top {saturation_share:.1%},\n"
+                "the remaining functions add no bug-fix commits"
+            ),
             color="#e76f51",
             fontsize="small",
             va="top",
         )
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.set_xlabel("Share of functions, ordered by descending complexity")
-    ax.set_ylabel("Cumulative share of bug-fix commits")
-    ax.set_title("How concentrated is bug-fix activity in complex functions?")
+    ax.set_xlabel("Top x% most complex functions")
+    ax.set_ylabel("Cumulative share of all bug-fix commits captured")
+    ax.set_title("Bug-fix commits captured as functions are added by descending complexity")
+    ax.xaxis.set_major_formatter(PercentFormatter(xmax=1.0))
+    ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0))
+    ax.legend(loc="lower right", fontsize="small", frameon=True)
     fig.tight_layout()
     fig.savefig(target, dpi=200)
     plt.close(fig)

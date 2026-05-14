@@ -64,21 +64,44 @@
 
   == Maintenance Concentration
 
-  The bucketed view sharpens this pattern. Most analyzed functions fall into the 1--20 complexity bucket, and only 26.5% of them were touched by at least one bug-fix commit. In the 21--40 bucket, that share rises to 54.6%. The 41--60 and 61--80 buckets remain above 52%, and the smaller high-complexity buckets are mostly similar or higher, although those ranges contain far fewer functions. The mean number of bug-fix commits per function follows the same pattern, rising from 0.48 in the 1--20 bucket to 1.76 in the 21--40 bucket and 2.16 in the 41--60 bucket.
+  Most analyzed functions fall into the 1--20 complexity score bucket, and only 26.5% of them were touched by at least one bug-fix commit. In the 21--40 bucket, that share rises to 54.6%. The 41--60 and 61--80 buckets remain above 52%, and the smaller high-complexity buckets are mostly similar or higher, although those ranges contain far fewer functions. The mean number of bug-fix commits per function (including functions with zero bug-fix commits) follows the same pattern, rising from 0.48 in the 1--20 bucket to 1.76 in the 21--40 bucket and 2.16 in the 41--60 bucket. The drop-off in the highest buckets is likely due to the extremely small sample sizes.
 
   #figure(
     image("../Code/output/latest/plots/complexity_bucket_bugfix_share.png", width: 100%),
-    caption: [Bug-fix share by complexity bucket. Functions above a complexity of 20 show substantially higher bug-fix shares than the largest low-complexity bucket.],
+    caption: [Share of functions touched by at least one bug-fix commit, and mean bug-fix commits per function, bucketed into groups of 20. ],
   ) <bucket-fig>
 
-  The cumulative concentration plot answers a slightly different question. It orders all functions from highest complexity to lowest complexity, then shows how much of the total bug-fix activity has been accumulated after taking the top $x$% of that ordering. If bug-fix activity were spread evenly across the codebase, the curve would follow the diagonal. Instead, it stays above the diagonal throughout. The 1% most complex functions account for 3.8% of all bug-fix commits, the top 5% account for 16.7%, the top 10% account for 29.1%, the top 20% account for 47.3%, and the top half account for 73.8%. This means maintenance work is meaningfully concentrated in more complex functions, but not so strongly that a very small minority of functions accounts for nearly all fixes.
+  #let bucket_rows = csv("../Code/output/latest/complexity_bucket_summary.csv", row-type: dictionary)
+  #let bucket_cells = (
+    bucket_rows
+      .map(row => (
+        [#row.at("complexity_bucket")],
+        [#row.at("functions")],
+        [#row.at("bugfixed_functions")],
+        [#(calc.round(float(row.at("mean_bugfix_commits")) * 100) / 100)],
+      ))
+      .flatten()
+  )
+
+  #figure(
+    table(
+      columns: 4,
+      inset: 6pt,
+      align: (left, right, right, right),
+      table.header(
+        [*Complexity bucket*], [*Functions*], [*Bug-fixed functions*], [*Mean bug-fix commits per function*]
+      ),
+      ..bucket_cells,
+    ),
+    caption: [Complexity bucket summary. The mean bug-fix count is computed over all functions in each bucket, including functions with zero bug-fix commits.],
+  ) <bucket-table>
+
+  The cumulative concentration plot answers a slightly different question. It orders all functions from highest complexity to lowest complexity, then shows how much of the total bug-fix activity has been accumulated after taking the top $x$% of that ordering. If bug-fix activity were spread evenly across the codebase, the curve would follow the diagonal. Instead, it stays above the diagonal throughout. The 1% most complex functions account for 3.8% of all bug-fix commits, the top 5% account for 16.7%, the top 10% account for 29.1%, the top 20% account for 47.3%, and the top half account for 73.8% (see @hotspot-fig). This means maintenance work is meaningfully concentrated in more complex functions, but not so strongly that a very small minority of functions accounts for nearly all fixes.
 
   #figure(
     image("../Code/output/latest/plots/hotspot_concentration.png", width: 100%),
     caption: [Cumulative concentration of bug-fix activity among the most complex functions.],
   ) <hotspot-fig>
-
-  The repeat-fix distribution highlights the same concentration from another angle. 72.7% of analyzed functions were not touched by any bug-fix commit, 16.3% were touched once, and 5.7% were touched twice. After that, the distribution decays into a long tail, with a small number of functions accumulating many repeated bug-fix touches and the highest observed value reaching 29. Together, the bucketed, cumulative, and repeat-fix views all point to the same result: higher complexity is associated not only with a greater chance of being fixed at least once, but also with a greater share of the ongoing maintenance burden.
 
   == Complexity Changes in Bug-fixing Commits
 
@@ -106,13 +129,15 @@
     caption: [Complexity-change categories for simplified SZZ attributions. A substantial share of attributions cannot be recovered at function level, but matched rows still show more increases than decreases.],
   ) <szz-change-fig>
 
-  When only matched attributions are considered, the pattern becomes clearer: 69.1% of matched @szz rows show no change, 21.7% show an increase, and 9.2% show a decrease. Thus, among attributable function pairs, increases are distinctly more common than decreases, but unchanged functions still dominate. This suggests that bug-introducing commits are more likely to add complexity than remove it, although a rise in cyclomatic complexity is neither necessary nor sufficient for a later defect.
+  When only matched attributions are considered, the pattern becomes clearer: 69.1% of matched @szz rows show no change, 21.7% show an increase, and 9.2% show a decrease. Thus, among attributable function pairs, increases are distinctly more common than decreases, but unchanged functions still dominate. This suggests that bug-introducing commits are more likely to add complexity than remove it, although a rise in @cyclomatic_complexity is neither necessary nor sufficient as evidence for a later defect.
 
   #pdf.attach(
     "../Code/output/latest/matched_szz_summary.csv",
     relationship: "source",
     description: "SZZ attributions, but filtered for only the matched function pairs.",
   ) <szz-matched-data>
+
+  == Time To Fix
 
   The temporal distance between attributed bug-introducing and bug-fixing commits is also substantial. Across 27,526 unique attributed commit pairs with valid, non-negative timestamps, the median lag is 751.1 days, with an interquartile range from 189.0 to 1807.8 days. The package-level summaries show substantial variation. Pydantic has the shortest median lag at 133.1 days, while pytest-cov reaches 2332.5 days, requests 1888.4 days, and scipy 1232.6 days. Many attributed bugs therefore remain latent for months or years before being repaired.
 
@@ -121,6 +146,6 @@
     caption: [Distribution of time lags between attributed bug-introducing commits and their corresponding fixes.],
   ) <szz-lag-fig>
 
-  Taken together, these findings answer the second research question in a qualified way. Bug-fixing commits usually leave measured complexity unchanged, and when complexity does change, increases are more common than decreases. The simplified @szz results point in the same direction for attributed bug-introducing commits, but they also show that a substantial fraction of historical function pairs cannot be recovered confidently. The overall picture is therefore not one of direct causation, but of elevated maintenance risk: higher complexity is associated with more bug-fix activity and a larger share of repeated maintenance, while the actual path from change to defect remains shaped by package-specific workflows and long time lags.
+  Overall, these findings answer the second research question in a qualified way. Bug-fixing commits usually leave measured complexity unchanged, and when complexity does change, it tends to increase rather than decrease. The simplified @szz results point in the same direction for attributed bug-introducing commits, but they also show that a substantial fraction of historical function pairs cannot be recovered confidently. The overall picture is therefore not one of direct causation, but of elevated maintenance risk: higher complexity is associated with more bug-fix activity and a larger share of repeated maintenance, while the actual path from change to defect remains shaped by package-specific workflows and long time lags.
 
 ]
