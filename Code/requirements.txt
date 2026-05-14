@@ -6,3 +6,5 @@ requests
 tqdm
 lizard
 pybraries
+jupyterlab
+google-cloud-bigquery

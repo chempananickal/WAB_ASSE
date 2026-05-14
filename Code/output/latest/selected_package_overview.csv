@@ -1,0 +1,11 @@
+rank,package,version,commit_code,functions_analyzed
+1,requests,2.33.1,04d750509b90,247
+2,numpy,2.4.4,0f897ea33050,7872
+3,pytest,9.0.3,8f81c76744da,1966
+4,pandas,3.0.2,566284d0ce87,7936
+5,pydantic,2.13.3,14e0f2ba41ea,3334
+6,matplotlib,3.10.9,f4cc437d1bd7,11007
+7,pytest-cov,7.1.0,574f0c59cf89,52
+8,click,8.3.3,73e155006526,507
+9,scipy,1.17.1,815ef31f7e66,13603
+10,black,26.3.1,9fd9ea283597,627

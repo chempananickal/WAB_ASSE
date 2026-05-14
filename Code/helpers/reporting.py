@@ -39,6 +39,10 @@ CSV_MESSAGE_PRIMARY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 CSV_MESSAGE_CLOSE_PATTERN = re.compile(r"\b(close[sd]?|closing)\b", re.IGNORECASE)
+RUN_DETAILS_HEAD_PATTERN = re.compile(
+    r"^- (?P<package>[^:]+): (?P<commit_hash>[0-9a-f]{7,40}) \| ",
+    re.IGNORECASE,
+)
 
 
 def compact_commit_message_for_csv(value: Any) -> Any:
@@ -214,11 +218,12 @@ def assign_complexity_buckets(function_df: pd.DataFrame) -> tuple[pd.DataFrame, 
     """Assign fixed-width complexity buckets with clean integer bounds."""
 
     bucket_df = function_df.copy()
+    overall_max_complexity = int(bucket_df["complexity"].max())
     bugfixed_complexities = bucket_df.loc[bucket_df["was_bugfixed"] > 0, "complexity"].dropna()
     focus_max_complexity = (
         int(bugfixed_complexities.max())
         if not bugfixed_complexities.empty
-        else int(bucket_df["complexity"].max())
+        else overall_max_complexity
     )
     bucket_width = choose_nice_bucket_width(max(focus_max_complexity, 1))
     max_complexity = max(bucket_width, int(math.ceil(focus_max_complexity / bucket_width) * bucket_width))
@@ -230,6 +235,8 @@ def assign_complexity_buckets(function_df: pd.DataFrame) -> tuple[pd.DataFrame, 
     ]
     # Fold rarer high-complexity outliers into the final bucket so the plot
     # stays focused on the range where bug-fixed functions actually appear.
+    if overall_max_complexity > bucket_edges[-1]:
+        bucket_labels[-1] = f"{bucket_edges[-2] + 1}-{bucket_edges[-1]}+"
     clipped_complexity = bucket_df["complexity"].clip(upper=bucket_edges[-1])
     bucket_df["complexity_bucket"] = pd.cut(
         clipped_complexity,
@@ -415,6 +422,118 @@ def build_extreme_bugfix_function_table(
         ascending=[False, True, True, True, True, True],
     ).reset_index(drop=True)
     return merged.reindex(columns=columns)
+
+
+def build_selected_package_overview(
+    packages_df: pd.DataFrame,
+    package_summary: pd.DataFrame,
+    analysis_run_details_path: Path | None = None,
+) -> pd.DataFrame:
+    """Build the selected-package overview table used in the methods chapter."""
+
+    columns = ["rank", "package", "version", "commit_code", "functions_analyzed"]
+    if packages_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    commit_codes: dict[str, str] = {}
+    if analysis_run_details_path is not None and analysis_run_details_path.exists():
+        for line in analysis_run_details_path.read_text(encoding="utf-8").splitlines():
+            match = RUN_DETAILS_HEAD_PATTERN.match(line.strip())
+            if match is None:
+                continue
+            commit_codes[match.group("package")] = match.group("commit_hash")[:12]
+
+    overview = packages_df.loc[:, ["rank", "name", "version"]].rename(columns={"name": "package"})
+    functions = (
+        package_summary.loc[:, ["package", "functions_analyzed"]]
+        if not package_summary.empty
+        else pd.DataFrame(columns=["package", "functions_analyzed"])
+    )
+    overview = overview.merge(functions, on="package", how="left")
+    overview["commit_code"] = overview["package"].map(commit_codes).fillna("")
+    overview["functions_analyzed"] = overview["functions_analyzed"].fillna(0).astype(int)
+    return overview.reindex(columns=columns)
+
+
+def build_package_correlation_table(package_summary: pd.DataFrame) -> pd.DataFrame:
+    """Build the compact package-level correlation table used in the results chapter."""
+
+    columns = ["package", "spearman_r", "pearson_r"]
+    if package_summary.empty:
+        return pd.DataFrame(columns=columns)
+
+    table = package_summary.loc[:, ["package_rank", "package", "spearman_r", "pearson_r"]].copy()
+    table = table.sort_values(["spearman_r", "package"], ascending=[False, True]).reset_index(drop=True)
+    table["spearman_r"] = table["spearman_r"].map(lambda value: f"{float(value):.3f}")
+    table["pearson_r"] = table["pearson_r"].map(lambda value: f"{float(value):.3f}")
+    return table.loc[:, columns]
+
+
+def build_szz_matched_summary(szz_df: pd.DataFrame) -> pd.DataFrame:
+    """Summarize only matched SZZ attributions with explicit function pairs."""
+
+    columns = ["category", "count", "share", "matched_total", "overall_total"]
+    if szz_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    matched_categories = ["Increase", "No change", "Decrease"]
+    matched = szz_df.loc[szz_df["complexity_category"].isin(matched_categories)].copy()
+    overall_total = int(len(szz_df))
+    matched_total = int(len(matched))
+    if matched_total == 0:
+        return pd.DataFrame(columns=columns)
+
+    summary = matched.groupby("complexity_category").size().reset_index(name="count")
+    summary = summary.rename(columns={"complexity_category": "category"})
+    summary["share"] = summary["count"] / matched_total
+    summary["matched_total"] = matched_total
+    summary["overall_total"] = overall_total
+    summary["category"] = pd.Categorical(summary["category"], categories=matched_categories, ordered=True)
+    summary = summary.sort_values("category").reset_index(drop=True)
+    return summary.reindex(columns=columns)
+
+
+def build_overall_szz_lag_summary(szz_df: pd.DataFrame) -> pd.DataFrame:
+    """Build a one-row overall lag summary across all valid SZZ pairs."""
+
+    columns = ["pair_count", "median_lag_days", "p25_lag_days", "p75_lag_days"]
+    if szz_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    lag_df = szz_df[
+        [
+            "bugfix_commit",
+            "bugfix_commit_date",
+            "bug_introducing_commit",
+            "bug_introducing_commit_date",
+        ]
+    ].drop_duplicates().copy()
+    lag_df["bugfix_commit_date"] = pd.to_datetime(lag_df["bugfix_commit_date"], utc=True, errors="coerce")
+    lag_df["bug_introducing_commit_date"] = pd.to_datetime(
+        lag_df["bug_introducing_commit_date"], utc=True, errors="coerce"
+    )
+    lag_df = lag_df.dropna(subset=["bugfix_commit_date", "bug_introducing_commit_date"])
+    if lag_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    lag_df["lag_days"] = (
+        lag_df["bugfix_commit_date"] - lag_df["bug_introducing_commit_date"]
+    ).dt.total_seconds() / 86400.0
+    lag_df = lag_df.loc[lag_df["lag_days"] >= 0].copy()
+    if lag_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    return pd.DataFrame(
+        [
+            {
+                "pair_count": int(len(lag_df)),
+                "median_lag_days": float(lag_df["lag_days"].median()),
+                "p25_lag_days": float(lag_df["lag_days"].quantile(0.25)),
+                "p75_lag_days": float(lag_df["lag_days"].quantile(0.75)),
+            }
+        ],
+        columns=columns,
+    )
 
 
 def plot_package_normalized_bugfix_density(package_summary: pd.DataFrame, target: Path) -> pd.DataFrame:

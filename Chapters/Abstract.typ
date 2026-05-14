@@ -1,5 +1,13 @@
 #let abstract_content = [
+  #heading([Abstract], numbering: none)
+
+  This study investigates whether cyclomatic complexity is associated with bug-proneness in important Python packages and how bug-fixing commits relate to later complexity change. Ten highly depended-upon PyPI packages were selected by reverse dependency rank and mined over a five-year window. The resulting dataset covers 47,151 functions. Cyclomatic complexity was measured with Lizard, bug-fixing commits were identified through a commit-message heuristic, and likely bug-introducing commits were approximated with a simplified SZZ procedure.
+
+  The results show a consistent but moderate positive relationship between function complexity and bug-fix activity across all ten repositories. Maintenance is also concentrated in more complex code: the top 10% most complex functions account for 29.1% of bug-fix commits, and the top 20% account for 47.3%. Most bug-fixing commits do not change measured complexity, and when complexity does change, increases are more common than decreases. The findings therefore support interpreting cyclomatic complexity as a useful indicator of elevated maintenance risk, but not as direct proof of future defects.
 
   #heading([Abstrakt], numbering: none)
 
+  Diese Studie untersucht, ob ein Zusammenhang zwischen zyklomatischer Komplexität und Fehleranfälligkeit in wichtigen Python-Paketen besteht und wie sich Bugfix-Commits auf die spätere Komplexität von Funktionen auswirken. Dafür wurden zehn stark abhängige PyPI-Pakete anhand ihrer Reverse-Dependency-Ränge ausgewählt und über ein Zeitfenster von fünf Jahren analysiert. Der resultierende Datensatz umfasst 47.151 Funktionen. Die zyklomatische Komplexität wurde mit Lizard gemessen, Bugfix-Commits wurden über eine Commit-Message-Heuristik identifiziert, und wahrscheinlich fehlerverursachende Commits wurden mit einem vereinfachten SZZ-Verfahren angenähert.
+
+  Die Ergebnisse zeigen über alle zehn Repositorien hinweg einen konsistenten, aber nur moderaten positiven Zusammenhang zwischen Funktionskomplexität und Bugfix-Aktivität. Wartungsaufwand konzentriert sich zudem auf komplexeren Code: Die komplexesten 10% der Funktionen vereinen 29,1% aller Bugfix-Commits auf sich, die komplexesten 20% bereits 47,3%. Die meisten Bugfix-Commits verändern die gemessene Komplexität nicht, und wenn sich die Komplexität verändert, sind Erhöhungen häufiger als Verringerungen. Zyklomatische Komplexität erweist sich damit als nützlicher Hinweis auf erhöhtes Wartungsrisiko, aber nicht als direkter Beleg für spätere Defekte.
 ]

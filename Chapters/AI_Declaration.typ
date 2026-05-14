@@ -138,4 +138,9 @@
     prompt: [Replace the old package-selection source with Libraries.io and update the supporting documentation accordingly.],
     usage: [Switched package discovery to Libraries.io and updated the related documentation.],
   ),
+  (
+    system: [GitHub Copilot 28],
+    prompt: [Look at my code. See if I missed something in the SZZ Attribution section in my paper.],
+    usage: [Expanded the SZZ Attribution section to include more details on the matching strategy and the handling of unmatched cases.],
+  ),
 )

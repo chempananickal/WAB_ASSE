@@ -1,6 +1,22 @@
 #let discussion_content = [
   = Discussion
 
+  The results show a consistent relationship between cyclomatic complexity and later maintenance, but they do not support a simple claim that complex code is automatically defective. Across all ten packages, the correlation between complexity and bug-fix frequency is always positive, and the concentration analyses show that more complex functions absorb a disproportionate share of bug-fix activity. At the same time, the effect is moderate rather than overwhelming. The top 10% most complex functions account for 29.1% of bug-fix commits, and the top 20% account for 47.3%. Complexity therefore looks like a meaningful risk signal, but not a stand-alone explanation for why bugs occur.
+
+  The bug-fix and @szz change summaries also point to a more specific interpretation. Most bug-fixing commits do not reduce measured complexity, and most matched bug-introducing commits also show no complexity change. When changes do occur, increases are more common than decreases in both views. This suggests that complexity matters less as a one-time threshold crossed by a single commit and more as a structural condition that can make a function harder to reason about, harder to test thoroughly, and more likely to accumulate compensating logic over time. In practical terms, the findings fit a maintenance-risk interpretation better than a direct causal interpretation.
+
+  The long lag between attributed bug-introducing and bug-fixing commits reinforces that point. The median lag across valid attributed pairs is just over two years, and several packages show much longer medians. That makes it difficult to treat present complexity as a direct explanation of a later failure. A function may become buggy under one local context and only fail much later after surrounding code, inputs, or usage patterns change. Complexity appears to increase the opportunity for such failures to persist, but the data do not support the stronger claim that it alone produces them.
+
   == Limitations
+
+  Several methodological limits constrain how strongly these results should be generalized. Bug-fixing commits were identified through a commit-message heuristic rather than issue links or classifier-based labelling. This likely introduces both false positives and false negatives. Some genuine fixes will not use the selected keywords, while some matching commits may concern refactoring, documentation, or maintenance work that is not truly bug fixing.
+
+  The simplified @szz procedure is also deliberately conservative. A substantial share of attributed rows could not be recovered as function pairs, which reflects the difficulty of tracing historical changes through renames, refactorings, moves, and partial rewrites. That conservatism is preferable to overly aggressive matching, but it means the function-level @szz results likely understate the number of attributable pairs and may be biased toward functions whose identity remains easier to preserve across revisions.
+
+  Another limitation is the use of cyclomatic complexity as the sole structural metric. Cyclomatic complexity is well established and easy to compute across languages, which makes it suitable for a multi-language repository sample, but it does not capture all forms of difficulty relevant to maintenance. Deep nesting, data-flow complexity, temporal coupling, and architectural entanglement can all matter even when cyclomatic complexity changes little.
+
+  The package sample is also intentionally narrow. The ten selected projects are important packages by reverse dependency rank, but they are not representative of the entire Python ecosystem. The sample includes very large scientific packages and much smaller infrastructure packages, and those scale differences can affect both the stability of per-package correlations and the shape of the aggregate results. The findings should therefore be read as evidence about central, high-impact packages rather than about all Python projects.
+
+  Finally, the analysis focuses on production source files and explicitly excludes documentation, tests, examples, benchmarks, and build artifacts. That choice is appropriate for the stated goal, but it also means the study does not capture defects that are concentrated in test scaffolding or developer tooling. The results therefore describe the relationship between complexity and maintenance in analyzed source code, not in the repository as a whole.
 
 ]

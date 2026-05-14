@@ -1,5 +1,5 @@
 #let body-font = "New Computer Modern"
-#let display-font = "CMU Sans Serif"
+#let display-font = "Calibri"
 
 #import "@preview/glossy:0.9.0": theme-basic
 
@@ -13,7 +13,7 @@
       right: 2.5cm,
     ),
   )
-  set text(lang: "en", font: body-font, size: 14pt)
+  set text(lang: "en", font: body-font, size: 12pt)
   set par(justify: true, leading: 0.72em)
   set heading(numbering: "1.")
   show heading: set text(font: display-font)

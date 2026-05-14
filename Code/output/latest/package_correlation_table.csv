@@ -1,0 +1,11 @@
+package,spearman_r,pearson_r
+black,0.429,0.548
+pytest,0.319,0.456
+pytest-cov,0.296,0.499
+pandas,0.291,0.407
+click,0.289,0.534
+matplotlib,0.262,0.348
+scipy,0.250,0.207
+numpy,0.227,0.256
+requests,0.207,0.251
+pydantic,0.134,0.188

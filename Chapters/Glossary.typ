@@ -28,4 +28,9 @@
     long: "Large Language Model",
     group: abbreviation_group,
   ),
+  aws: (
+    short: "AWS",
+    long: "Amazon Web Services",
+    group: abbreviation_group,
+  ),
 )

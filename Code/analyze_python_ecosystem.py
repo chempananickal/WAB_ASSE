@@ -35,6 +35,10 @@ try:
     from helpers.models import PackageRecord
     from helpers.progress import configure_logging, consume_progress_events, log_message
     from helpers.reporting import (
+        build_overall_szz_lag_summary,
+        build_package_correlation_table,
+        build_selected_package_overview,
+        build_szz_matched_summary,
         build_extreme_bugfix_function_table,
         bugfix_event_frame_from_raw_json,
         load_raw_results_json,
@@ -74,6 +78,10 @@ except ImportError:
     from Code.helpers.models import PackageRecord
     from Code.helpers.progress import configure_logging, consume_progress_events, log_message
     from Code.helpers.reporting import (
+        build_overall_szz_lag_summary,
+        build_package_correlation_table,
+        build_selected_package_overview,
+        build_szz_matched_summary,
         build_extreme_bugfix_function_table,
         bugfix_event_frame_from_raw_json,
         load_raw_results_json,
@@ -103,6 +111,8 @@ def result_paths(output_dir: Path) -> dict[str, Path]:
         "package_summary": output_dir / "package_summary.csv",
         "bugfix_event_metrics": output_dir / "bugfix_event_metrics.csv",
         "szz_function_attributions": output_dir / "szz_function_attributions.csv",
+        "selected_package_overview": output_dir / "selected_package_overview.csv",
+        "package_correlation_table": output_dir / "package_correlation_table.csv",
         "complexity_bucket_summary": output_dir / "complexity_bucket_summary.csv",
         "hotspot_concentration_summary": output_dir / "hotspot_concentration_summary.csv",
         "repeat_bugfix_distribution_summary": output_dir / "repeat_bugfix_distribution_summary.csv",
@@ -111,7 +121,9 @@ def result_paths(output_dir: Path) -> dict[str, Path]:
         "bugfix_complexity_change_summary": output_dir / "bugfix_complexity_change_summary.csv",
         "bugfix_commit_timeline_summary": output_dir / "bugfix_commit_timeline_summary.csv",
         "szz_fix_lag_summary": output_dir / "szz_fix_lag_summary.csv",
+        "overall_szz_lag_summary": output_dir / "overall_szz_lag_summary.csv",
         "szz_summary": output_dir / "szz_summary.csv",
+        "matched_szz_summary": output_dir / "matched_szz_summary.csv",
         "analysis_run_details": output_dir / "analysis_run_details.txt",
         "raw_results": output_dir / "raw_function_histories.json",
         "complexity_bucket_plot": output_dir / "plots" / "complexity_bucket_bugfix_share.png",
@@ -309,6 +321,12 @@ def render_plots_and_summaries(
 
     paths = result_paths(output_dir)
     log_message("Generating plots and summaries.")
+    selected_package_overview = build_selected_package_overview(
+        packages_df,
+        package_summary,
+        paths["analysis_run_details"],
+    )
+    package_correlation_table = build_package_correlation_table(package_summary)
     if not function_df.empty:
         bucket_summary = plot_complexity_buckets(function_df, paths["complexity_bucket_plot"])
         hotspot_concentration_summary = plot_hotspot_concentration(
@@ -384,11 +402,21 @@ def render_plots_and_summaries(
         )
     if not szz_df.empty:
         szz_fix_lag_summary = plot_szz_fix_lag_distribution(szz_df, paths["szz_fix_lag_plot"])
+        overall_szz_lag_summary = build_overall_szz_lag_summary(szz_df)
+        matched_szz_summary = build_szz_matched_summary(szz_df)
     else:
         szz_fix_lag_summary = pd.DataFrame(
             columns=["package", "pair_count", "median_lag_days", "p25_lag_days", "p75_lag_days"]
         )
+        overall_szz_lag_summary = pd.DataFrame(
+            columns=["pair_count", "median_lag_days", "p25_lag_days", "p75_lag_days"]
+        )
+        matched_szz_summary = pd.DataFrame(
+            columns=["category", "count", "share", "matched_total", "overall_total"]
+        )
     szz_summary = plot_szz_summary(szz_df, paths["szz_plot"])
+    write_dataframe(selected_package_overview, paths["selected_package_overview"])
+    write_dataframe(package_correlation_table, paths["package_correlation_table"])
     write_dataframe(bucket_summary, paths["complexity_bucket_summary"])
     write_dataframe(hotspot_concentration_summary, paths["hotspot_concentration_summary"])
     write_dataframe(repeat_bugfix_distribution_summary, paths["repeat_bugfix_distribution_summary"])
@@ -397,7 +425,9 @@ def render_plots_and_summaries(
     write_dataframe(bugfix_change_summary, paths["bugfix_complexity_change_summary"])
     write_dataframe(bugfix_timeline_summary, paths["bugfix_commit_timeline_summary"])
     write_dataframe(szz_fix_lag_summary, paths["szz_fix_lag_summary"])
+    write_dataframe(overall_szz_lag_summary, paths["overall_szz_lag_summary"])
     write_dataframe(szz_summary, paths["szz_summary"])
+    write_dataframe(matched_szz_summary, paths["matched_szz_summary"])
     write_raw_results_json(
         packages_df=packages_df,
         function_df=function_df,
